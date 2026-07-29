@@ -1,0 +1,56 @@
+# From-scratch training on GraphQA (size B) for the L/H recursion ablation.
+#
+# Unlike cfg_sft.yaml this does NOT resume from a pretrained checkpoint:
+# each (H_cycles, L_cycles) config is trained from scratch so the comparison
+# between recursion regimes is not biased by a shared pretrained init.
+#
+# Per-run CLI overrides (see slurm/train_graphqa.slurm):
+#   arch/size@arch=B
+#   data.path=$SCRATCH/graphqa/std_prepared
+#   arch.H_cycles=<H> arch.L_cycles=<L>
+#   run_name=graphqa_H<H>_L<L>
+#   checkpoint_path=$SCRATCH/graphqa/ckpts/graphqa_H<H>_L<L>
+defaults:
+  - arch/net@arch: hrm
+  - arch/size@arch: B
+  - data: sft
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# From scratch: no checkpoint to resume from.
+resume_from: null
+
+# W&B grouping (run_name is set per config on the CLI).
+project_name: HRM-GraphQA-Ablation
+run_name: null
+checkpoint_path: null
+
+# GraphQA is a small, narrow task -> more epochs, modest token batch.
+# NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
+global_batch_size: 32768   # tokens per optimizer step (single H100 fits size B)
+epochs: 20
+checkpoint_interval: 5
+
+# From-scratch LR schedule (higher than SFT's 3e-5, with a short warmup).
+lr: 3.0e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 200
+
+weight_decay: 0.1
+beta1: 0.9
+beta2: 0.95
+
+# EMA tuned for short-ish runs; eval uses EMA weights by default (--use_ema).
+ema: 0.999
+
+# Fixed across every config so runs differ ONLY in (H_cycles, L_cycles).
+seed: 0
+
+# Backprop-through-time policy (from config/arch/net/hrm.yaml):
+#   bp_warmup_ratio=0.2, bp_min_steps=2, bp_max_steps=5.
+# Kept FIXED across all configs. This is HRM's native truncated 1-step-gradient
+# regime (bounded memory), which is required for the deep configs like (8,12).
+# Do NOT raise bp_max_steps to "full backprop" -- (8,12) unrolls 8*12=96 L-steps
+# and would blow up memory. Fixed truncation keeps the ablation fair and feasible.
