@@ -11,7 +11,7 @@ cd $WORK/HRM-Text-for-Graphs
 # EPOCHS **must** equal `epochs` in config/cfg_graphqa.yaml.
 EPOCHS=20
 DATA_DIR=$SCRATCH/graphqa/std_prepared
-TOKENIZER=$WORK/HRM-Text/tokenizer.json
+TOKENIZER=$WORK/HRM-Text-for-Graphs/tokenizer.json
 
 # ---- 1. Download the HRM-Text-1B tokenizer (tokenizer.json only) -----
 export HF_HOME=$WORK/hf_cache

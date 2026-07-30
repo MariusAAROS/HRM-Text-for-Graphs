@@ -33,7 +33,7 @@ RUN=graphqa_H${H}_L${L}
 module purge
 module load arch/h100
 module load pytorch-gpu/py3/2.8.0            # <-- ADJUST to match training
-source $WORK/HRM-Text/.venv/bin/activate
+source $WORK/HRM-Text-for-Graphs/.venv/bin/activate
 
 export HF_HOME=$WORK/hf_cache
 export HF_HUB_OFFLINE=1
