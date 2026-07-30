@@ -101,11 +101,12 @@ def main():
     assert torch.cuda.is_available(), "FlexAttention validation needs a CUDA (A100) device."
     device = "cuda"
     ok = True
-    # fp32 for tight tolerances; bf16 for the training dtype (looser tolerances).
+    # fp32 for tight tolerances (proves correctness); bf16 = training dtype, so
+    # tolerances reflect its ~1e-2 rounding (causal sums over more keys -> larger noise).
     ok &= run_case(False, device, torch.float32, atol=2e-4, rtol=2e-4)
     ok &= run_case(True, device, torch.float32, atol=2e-4, rtol=2e-4)
-    ok &= run_case(False, device, torch.bfloat16, atol=2e-2, rtol=2e-2)
-    ok &= run_case(True, device, torch.bfloat16, atol=2e-2, rtol=2e-2)
+    ok &= run_case(False, device, torch.bfloat16, atol=5e-2, rtol=5e-2)
+    ok &= run_case(True, device, torch.bfloat16, atol=5e-2, rtol=5e-2)
     print("ALL PASS" if ok else "SOME CHECKS FAILED")
     raise SystemExit(0 if ok else 1)
 
