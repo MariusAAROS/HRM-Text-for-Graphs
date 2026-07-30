@@ -10,15 +10,15 @@
 #SBATCH --job-name=hrm_graphqa_eval
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
-#SBATCH --account=axa@h100          # <-- ADJUST: your H100 allocation
-#SBATCH -C h100
+#SBATCH --account=axa@a100          # <-- ADJUST: your A100 allocation
+#SBATCH -C a100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=24
+#SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
 #SBATCH --time=00:30:00
-#SBATCH --qos=qos_gpu_h100-dev
+#SBATCH --qos=qos_gpu_a100-dev
 #SBATCH --array=0-8
 
 set -euo pipefail
@@ -31,8 +31,8 @@ L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=graphqa_H${H}_L${L}
 
 module purge
-module load arch/h100
-module load pytorch-gpu/py3/2.8.0            # <-- ADJUST to match training
+module load arch/a100
+module load pytorch-gpu/py3/2.8.0            # <-- must match training
 source $WORK/HRM-Text-for-Graphs/.venv/bin/activate
 
 export HF_HOME=$WORK/hf_cache
@@ -56,6 +56,5 @@ srun python scripts/eval_graphqa.py \
   --ckpt_path ${CKPT_DIR} \
   --data ${EVAL_DATA} \
   --use_ema \
-  --batch_size 32 \
   --max_generation 32 \
   --out ${CKPT_DIR}/eval_test.json

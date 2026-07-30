@@ -29,7 +29,10 @@ checkpoint_path: null
 
 # GraphQA is a small, narrow task -> more epochs, modest token batch.
 # NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
-global_batch_size: 32768   # tokens per optimizer step (single H100 fits size B)
+# global_batch_size = packed tokens per step = FlexAttention sequence length S.
+# Keep it a multiple of 128 (Flex tiling). FlexAttention here is dense O(S^2),
+# so keep S small on A100 (4096 packs ~20 short graphqa samples per step).
+global_batch_size: 4096
 epochs: 20
 checkpoint_interval: 5
 

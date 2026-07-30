@@ -5,24 +5,25 @@
 # One SLURM job per (H_cycles, L_cycles) config via a job array. Each job
 # trains a size-B HRM from scratch on graphqa-standard on a single H100.
 #
-# Prerequisites (run once, on a LOGIN node -> see scripts/prepare_graphqa.sh):
-#   - venv with FlashAttention 3 (import flash_attn_interface) -- Hopper only.
-#   - tokenizer downloaded + graphqa tokenized to $SCRATCH/graphqa/std_prepared.
+# Prerequisites (run once, on a LOGIN node):
+#   - venv built with scripts/setup_venv_jeanzay.sh (torch FlexAttention, no FA3).
+#   - tokenizer downloaded + graphqa tokenized to $SCRATCH/graphqa/std_prepared
+#     via scripts/prepare_graphqa.sh.
 #
 # Submit with:  sbatch slurm/train_graphqa.slurm
 # =====================================================================
 #SBATCH --job-name=hrm_graphqa
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
-#SBATCH --account=axa@h100          # <-- ADJUST: your H100 allocation
-#SBATCH -C h100
+#SBATCH --account=axa@a100          # <-- ADJUST: your A100 allocation
+#SBATCH -C a100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=24          # H100 node: ~24 CPU cores per GPU
+#SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
-#SBATCH --qos=qos_gpu_h100-dev      # dev QoS (<=2h). Use qos_gpu_h100-t3 for the full sweep.
+#SBATCH --qos=qos_gpu_a100-dev      # dev QoS (<=2h). Use qos_gpu_a100-t3 for the full sweep.
 #SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
 
 set -euo pipefail
@@ -38,9 +39,9 @@ RUN=graphqa_H${H}_L${L}
 
 # ---- Environment (Jean Zay H100) ------------------------------------
 module purge
-module load arch/h100
-module load pytorch-gpu/py3/2.8.0            # <-- ADJUST to an H100-built module
-source $WORK/HRM-Text-for-Graphs/.venv/bin/activate     # <-- venv containing FA3
+module load arch/a100
+module load pytorch-gpu/py3/2.8.0            # <-- must match setup_venv_jeanzay.sh
+source $WORK/HRM-Text-for-Graphs/.venv/bin/activate     # <-- venv (FlexAttention, no FA3)
 
 export HF_HOME=$WORK/hf_cache
 export HF_HUB_OFFLINE=1

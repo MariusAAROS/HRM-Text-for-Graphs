@@ -22,9 +22,12 @@ import os
 import re
 from typing import Optional
 
+import numpy as np
+import torch
 import yaml
 
-from simple_inference_engine import inference_load_checkpoint, inference_generate
+from models.layers import find_multiple
+from simple_inference_engine import inference_load_checkpoint
 
 
 def normalize(text: str) -> str:
@@ -44,16 +47,49 @@ def read_config_cycles(ckpt_path: str) -> tuple[Optional[int], Optional[int]]:
     return arch.get("H_cycles"), arch.get("L_cycles")
 
 
+@torch.inference_mode()
+def generate(ckpt, condition: str, prompt: str, max_generation: int, pad_multiple: int = 128) -> str:
+    """Greedy, cache-free generation.
+
+    Rebuilds a single-document packed batch each step (prompt = prefix, generated
+    tokens = causal) and reads the next-token logits. Avoids the KV-cache path so
+    everything runs through the FlexAttention training forward. GraphQA answers are
+    short, so the O(n^2) re-encode cost is negligible.
+    """
+    prompt_ids = ckpt.tokenize_prompt(condition, prompt)  # boq + condition + instruction + eoq
+    prompt_len = int(prompt_ids.shape[0])
+    stop_id = int(ckpt.tokenizer.convert_tokens_to_ids(ckpt.tokenizer_info["eoa"]))
+
+    gen: list[int] = []
+    for _ in range(max_generation):
+        seq = np.concatenate([prompt_ids, np.asarray(gen, dtype=prompt_ids.dtype)]) if gen else prompt_ids
+        total = int(seq.shape[0])
+        S = find_multiple(total, pad_multiple)
+
+        inputs = np.zeros(S, dtype=np.int64);       inputs[:total] = seq
+        position_ids = np.zeros(S, dtype=np.int64); position_ids[:total] = np.arange(total)
+        doc_ids = np.full(S, -1, dtype=np.int32);   doc_ids[:total] = 0
+        prefix_ends = np.zeros(S, dtype=np.int32);  prefix_ends[:total] = prompt_len
+
+        batch = {k: torch.as_tensor(v, device="cuda")
+                 for k, v in {"inputs": inputs, "position_ids": position_ids,
+                              "doc_ids": doc_ids, "prefix_ends": prefix_ends}.items()}
+        _carry, logits = ckpt.model(ckpt.carry, batch)
+        next_id = int(logits[total - 1].argmax(-1).item())
+        if next_id == stop_id:
+            break
+        gen.append(next_id)
+
+    return ckpt.decode_generation(np.asarray(gen, dtype=np.int64), stop_id)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt_path", required=True, help="Directory with fsdp2_epoch_* + all_config.yaml.")
     ap.add_argument("--data", required=True, help="GraphQA JSONL (instruction/response/condition).")
     ap.add_argument("--ckpt_epoch", type=int, default=None, help="Epoch to load (default: latest).")
     ap.add_argument("--use_ema", action="store_true", help="Use EMA weights (recommended).")
-    ap.add_argument("--batch_size", type=int, default=32)
-    ap.add_argument("--max_tokens", type=int, default=2048, help="KV-cache length (prompt + generation).")
     ap.add_argument("--max_generation", type=int, default=32, help="Max new tokens for the answer.")
-    ap.add_argument("--temp", type=float, default=0.0, help="0 = greedy (deterministic).")
     ap.add_argument("--limit", type=int, default=None, help="Optional cap on number of eval samples.")
     ap.add_argument("--out", default=None, help="Where to write the JSON report.")
     args = ap.parse_args()
@@ -65,30 +101,13 @@ def main():
     print(f"Loaded {len(rows)} eval samples from {args.data}")
 
     ckpt = inference_load_checkpoint(args.ckpt_path, args.ckpt_epoch, args.use_ema)
-
-    def prompt_iter():
-        for idx, r in enumerate(rows):
-            condition = r.get("condition", "direct")
-            yield idx, (condition, r["instruction"])
-
-    predictions: dict[int, str] = {}
-    for pid, text in inference_generate(
-        ckpt,
-        prompt_iter(),
-        max_tokens=args.max_tokens,
-        max_generation=args.max_generation,
-        batch_size=args.batch_size,
-        temp=args.temp,
-    ):
-        predictions[pid] = text
-
     H_cycles, L_cycles = read_config_cycles(args.ckpt_path)
 
     results = []
     correct = 0
     for idx, r in enumerate(rows):
         gold = r["response"]
-        pred = predictions.get(idx, "")
+        pred = generate(ckpt, r.get("condition", "direct"), r["instruction"], args.max_generation)
         is_correct = normalize(pred) == normalize(gold)
         correct += int(is_correct)
         results.append({"id": idx, "gold": gold, "pred": pred, "correct": is_correct})

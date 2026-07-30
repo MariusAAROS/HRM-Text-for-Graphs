@@ -8,7 +8,6 @@ from einops import rearrange
 
 from models.common import trunc_normal_init_, unwrap_tensor
 from models.flash_attention_prefixlm_v2 import flash_attn_varlen_prefixlm
-from flash_attn_interface import flash_attn_with_kvcache
 
 
 Carry = dict[str, Any]
@@ -113,6 +112,29 @@ class Cache(NamedTuple):
                    values=torch.zeros((max_batch_size, max_seq_len, num_heads, head_dim), **kwargs))
 
 
+def _sdpa_with_kvcache(q: Tensor, k: Tensor, v: Tensor, cache: "Cache", cache_lengths: Tensor, is_causal: bool) -> Tensor:
+    # Ampere-compatible replacement for flash_attn_with_kvcache. Writes the new
+    # k,v into the static cache at [cache_lengths : cache_lengths + Sq], then
+    # attends over the valid cache range with SDPA. q/k/v: [B, Sq, H, D].
+    B, Sq, H, D = q.shape
+    max_seq_len = cache.keys.shape[1]
+    cache_lengths = cache_lengths.reshape(B)
+
+    positions = cache_lengths[:, None] + torch.arange(Sq, device=q.device)[None, :]  # [B, Sq]
+    idx = positions[..., None, None].expand(B, Sq, H, D)
+    cache.keys.scatter_(1, idx, k)
+    cache.values.scatter_(1, idx, v)
+
+    kv_pos = torch.arange(max_seq_len, device=q.device)
+    mask = (kv_pos[None, :] < (cache_lengths[:, None] + Sq))[:, None, None, :]       # [B, 1, 1, max_seq_len]
+    if is_causal:
+        mask = mask & (kv_pos[None, None, None, :] <= positions[:, None, :, None])   # [B, 1, Sq, max_seq_len]
+
+    out = F.scaled_dot_product_attention(
+        q.transpose(1, 2), cache.keys.transpose(1, 2), cache.values.transpose(1, 2), attn_mask=mask)
+    return out.transpose(1, 2)  # [B, Sq, H, D]
+
+
 class Attention(nn.Module):
     def __init__(self, hidden_size, head_dim, num_heads, num_key_value_heads, attn_type, init_std_in=None, init_std_out=None, **kwargs):
         super().__init__()
@@ -144,11 +166,10 @@ class Attention(nn.Module):
             # flash attn (training)
             attn_output = flash_attn_varlen_prefixlm(query, key, value, is_causal, **{name: unwrap_tensor(tensor) for name, tensor in seq_info.items()})
         else:
-            # Regardless of auto / non-autoregressive, apply attention based on current concatenated with cache.
-            attn_output = flash_attn_with_kvcache(q=query, k=key, v=value,
-                                                  k_cache=cache.keys, v_cache=cache.values, cache_seqlens=cache_lengths,
-                                                  num_splits=1,  # Must set to support torch.compile tracing.
-                                                  causal=is_causal)  # causal can always be False for PrefixLM. during AR generation seqlen is 1, so causal masking won't matter.
+            # A100 fallback (no FA3): write new k,v into the static cache, then attend
+            # over the valid range with SDPA. The graphqa eval uses a cache-free
+            # generator, so this path is best-effort for the KV-cache engine only.
+            attn_output = _sdpa_with_kvcache(query, key, value, cache, cache_lengths, is_causal)
 
         # attn_output: [..., seq_len, num_heads, head_dim]
         attn_output = rearrange(torch.sigmoid(gate) * attn_output, "... h hd -> ... (h hd)")  # type: ignore
