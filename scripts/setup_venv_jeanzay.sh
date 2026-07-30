@@ -14,8 +14,8 @@ set -euo pipefail
 
 # ---- Config (keep in sync with slurm/*.slurm) -----------------------
 PYTORCH_MODULE="pytorch-gpu/py3/2.8.0"   # <-- must match slurm/train_graphqa.slurm + slurm/eval_graphqa.slurm
-VENV_DIR="${VENV_DIR:-$WORK/HRM-Text/.venv}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_DIR="${VENV_DIR:-$REPO_DIR/.venv}"  # lives in the repo -> matches slurm 'source .../.venv'
 
 echo "==> Repo:          $REPO_DIR"
 echo "==> Venv:          $VENV_DIR"

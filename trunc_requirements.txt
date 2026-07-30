@@ -1,0 +1,14 @@
+coolname
+datasets
+einops
+hydra-core
+math-verify
+numba
+omegaconf
+pydantic
+PyYAML
+safetensors
+sympy
+tqdm
+transformers
+wandb
