@@ -6,7 +6,7 @@
 # =====================================================================
 set -euo pipefail
 
-cd $WORK/HRM-Text
+cd $WORK/HRM-Text-for-Graphs
 
 # EPOCHS **must** equal `epochs` in config/cfg_graphqa.yaml.
 EPOCHS=20

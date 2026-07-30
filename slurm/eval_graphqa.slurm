@@ -43,7 +43,7 @@ export TMPDIR=$JOBSCRATCH
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-cd $WORK/HRM-Text
+cd $WORK/HRM-Text-for-Graphs
 mkdir -p logs
 
 CKPT_DIR=$SCRATCH/graphqa/ckpts/${RUN}
