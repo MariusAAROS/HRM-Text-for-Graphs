@@ -2,7 +2,7 @@
 
 Run on an A100 node (needs CUDA + Triton for FlexAttention):
     module purge && module load arch/a100 && module load pytorch-gpu/py3/2.8.0
-    source $WORK/HRM-Text-for-Graphs/.venv/bin/activate
+    source $WORK/HRM-Text-for-Graphs/.a100_venv/bin/activate
     python scripts/validate_flex_attention.py
 
 Checks:

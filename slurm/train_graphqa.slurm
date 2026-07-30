@@ -41,7 +41,7 @@ RUN=graphqa_H${H}_L${L}
 module purge
 module load arch/a100
 module load pytorch-gpu/py3/2.8.0            # <-- must match setup_venv_jeanzay.sh
-source $WORK/HRM-Text-for-Graphs/.venv/bin/activate     # <-- venv (FlexAttention, no FA3)
+source $WORK/HRM-Text-for-Graphs/.a100_venv/bin/activate     # <-- venv (FlexAttention, no FA3)
 
 export HF_HOME=$WORK/hf_cache
 export HF_HUB_OFFLINE=1
