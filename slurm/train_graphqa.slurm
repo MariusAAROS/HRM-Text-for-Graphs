@@ -61,7 +61,10 @@ CKPT_DIR=$SCRATCH/graphqa/ckpts/${RUN}
 echo "[${RUN}] H_cycles=${H} L_cycles=${L}  data=${DATA_DIR}  ckpt=${CKPT_DIR}"
 
 # ---- Launch: single GPU, size B, from scratch -----------------------
-srun torchrun --standalone --nnodes=1 --nproc_per_node=1 pretrain.py \
+# Use the venv python to run torchrun (module torchrun -> module python, which
+# lacks the venv-only deps like coolname). `python -m torch.distributed.run`
+# == torchrun, but under the venv interpreter, so workers inherit it too.
+srun python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 pretrain.py \
   --config-name cfg_graphqa \
   arch/size@arch=B \
   data.path=${DATA_DIR} \
