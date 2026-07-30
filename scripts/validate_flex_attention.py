@@ -17,6 +17,10 @@ The third "overfit one batch" sanity check is the short training smoke run:
 import numpy as np
 import torch
 
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on sys.path
+
 from models.flash_attention_prefixlm_v2 import (
     compute_aux_seq_tensors_scalars,
     flash_attn_varlen_prefixlm,

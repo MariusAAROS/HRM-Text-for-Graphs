@@ -20,11 +20,14 @@ import argparse
 import json
 import os
 import re
+import sys
 from typing import Optional
 
 import numpy as np
 import torch
 import yaml
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on sys.path
 
 from models.layers import find_multiple
 from simple_inference_engine import inference_load_checkpoint
