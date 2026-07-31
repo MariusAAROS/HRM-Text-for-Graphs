@@ -15,6 +15,14 @@ Usage:
         --data data/graphqa/hrm-text/standard/test.jsonl \
         --use_ema \
         --out $SCRATCH/graphqa/ckpts/graphqa_H2_L3/eval_test.json
+
+    # With wandb logging for cross-run comparison:
+    python scripts/eval_graphqa.py \
+        --ckpt_path $SCRATCH/graphqa/ckpts/graphqa_H2_L3 \
+        --data data/graphqa/hrm-text/standard/test.jsonl \
+        --use_ema \
+        --wandb_project graphqa-eval \
+        --out $SCRATCH/graphqa/ckpts/graphqa_H2_L3/eval_test.json
 """
 import argparse
 import json
@@ -25,6 +33,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import wandb
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on sys.path
@@ -95,6 +104,11 @@ def main():
     ap.add_argument("--max_generation", type=int, default=32, help="Max new tokens for the answer.")
     ap.add_argument("--limit", type=int, default=None, help="Optional cap on number of eval samples.")
     ap.add_argument("--out", default=None, help="Where to write the JSON report.")
+    # wandb (opt-in: only active when --wandb_project is set)
+    ap.add_argument("--wandb_project", default=None, help="W&B project name. Enables wandb logging when set.")
+    ap.add_argument("--wandb_entity", default=None, help="W&B entity (team or user). Uses default if omitted.")
+    ap.add_argument("--wandb_name", default=None, help="W&B run name. Auto-generated from ckpt if omitted.")
+    ap.add_argument("--wandb_tags", nargs="*", default=None, help="Optional W&B tags (e.g. --wandb_tags ablation ema).")
     args = ap.parse_args()
 
     with open(args.data, encoding="utf-8") as f:
@@ -105,6 +119,28 @@ def main():
 
     ckpt = inference_load_checkpoint(args.ckpt_path, args.ckpt_epoch, args.use_ema)
     H_cycles, L_cycles = read_config_cycles(args.ckpt_path)
+
+    # ---- wandb init (opt-in) -----------------------------------------------
+    use_wandb = args.wandb_project is not None
+    if use_wandb:
+        run_name = args.wandb_name or os.path.basename(os.path.normpath(args.ckpt_path))
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=run_name,
+            tags=args.wandb_tags,
+            config={
+                "ckpt_path": args.ckpt_path,
+                "ckpt_epoch": args.ckpt_epoch,
+                "data": args.data,
+                "use_ema": args.use_ema,
+                "max_generation": args.max_generation,
+                "limit": args.limit,
+                "H_cycles": H_cycles,
+                "L_cycles": L_cycles,
+                "ratio_L_over_H": (L_cycles / H_cycles) if (H_cycles and L_cycles) else None,
+            },
+        )
 
     results = []
     correct = 0
@@ -131,6 +167,19 @@ def main():
 
     print(f"H_cycles={H_cycles} L_cycles={L_cycles}  "
           f"accuracy = {accuracy:.4f} ({correct}/{len(rows)})")
+
+    # ---- wandb log ----------------------------------------------------------
+    if use_wandb:
+        wandb.summary["accuracy"] = accuracy
+        wandb.summary["correct"] = correct
+        wandb.summary["n"] = len(rows)
+
+        # Per-sample table for drill-down in the wandb UI
+        table = wandb.Table(columns=["id", "gold", "pred", "correct"])
+        for r in results:
+            table.add_data(r["id"], r["gold"], r["pred"], r["correct"])
+        wandb.log({"eval/samples": table})
+        wandb.finish()
 
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

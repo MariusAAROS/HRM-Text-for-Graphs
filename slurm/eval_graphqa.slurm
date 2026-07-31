@@ -57,4 +57,6 @@ srun python scripts/eval_graphqa.py \
   --data ${EVAL_DATA} \
   --use_ema \
   --max_generation 32 \
+  --wandb_project graphqa-eval \
+  --wandb_tags H${H} L${L} ablation \
   --out ${CKPT_DIR}/eval_test.json
