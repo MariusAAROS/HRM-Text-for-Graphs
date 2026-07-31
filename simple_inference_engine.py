@@ -80,8 +80,14 @@ def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_us
     # Cast to fwd dtype & eval mode
     model = model.to(getattr(torch, model_cfg.fwd_bwd_dtype)).eval()
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(train_metadata.tokenizer_info["tokenizer_path"], use_fast=True)
+    # Load tokenizer. The prepared data dir usually holds only tokenizer.json (no
+    # config.json), which AutoTokenizer can't infer -> load the fast tokenizer file directly.
+    tok_path = train_metadata.tokenizer_info["tokenizer_path"]
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tok_path, use_fast=True)
+    except Exception:
+        from transformers import PreTrainedTokenizerFast
+        tokenizer = PreTrainedTokenizerFast(tokenizer_file=os.path.join(tok_path, "tokenizer.json"))
     return InferenceCheckpoint(
         model=model,
         carry=carry,
