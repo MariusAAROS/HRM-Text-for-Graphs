@@ -170,9 +170,7 @@ def main():
 
     # ---- wandb log ----------------------------------------------------------
     if use_wandb:
-        wandb.summary["accuracy"] = accuracy
-        wandb.summary["correct"] = correct
-        wandb.summary["n"] = len(rows)
+        wandb.log({"eval/accuracy": accuracy, "eval/correct": correct, "eval/n": len(rows)})
 
         # Per-sample table for drill-down in the wandb UI
         table = wandb.Table(columns=["id", "gold", "pred", "correct"])
