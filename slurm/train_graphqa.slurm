@@ -72,3 +72,10 @@ srun python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 
   arch.L_cycles=${L} \
   run_name=${RUN} \
   checkpoint_path=${CKPT_DIR}
+
+# ---- Archive checkpoints to $STORE for long-term preservation --------
+ARCHIVE_DIR=$STORE/graphqa/ckpts/${RUN}
+mkdir -p ${ARCHIVE_DIR}
+echo "[${RUN}] Archiving ${CKPT_DIR} -> ${ARCHIVE_DIR}"
+rsync -a --info=progress2 ${CKPT_DIR}/ ${ARCHIVE_DIR}/
+echo "[${RUN}] Archive complete."
