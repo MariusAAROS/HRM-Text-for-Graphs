@@ -17,7 +17,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --time=00:30:00
+#SBATCH --time=02:00:00
 #SBATCH --qos=qos_gpu_a100-dev
 #SBATCH --array=0-8
 

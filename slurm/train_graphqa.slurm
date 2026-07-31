@@ -1,9 +1,9 @@
 #!/bin/bash
 # =====================================================================
-# HRM-Text L/H recursion ablation on GraphQA (Jean Zay, H100 partition).
+# HRM-Text L/H recursion ablation on GraphQA (Jean Zay, A100 partition).
 #
 # One SLURM job per (H_cycles, L_cycles) config via a job array. Each job
-# trains a size-B HRM from scratch on graphqa-standard on a single H100.
+# trains a size-B HRM from scratch on graphqa-standard on a single A100.
 #
 # Prerequisites (run once, on a LOGIN node):
 #   - venv built with scripts/setup_venv_jeanzay.sh (torch FlexAttention, no FA3).
@@ -22,8 +22,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU
 #SBATCH --hint=nomultithread
-#SBATCH --time=02:00:00
-#SBATCH --qos=qos_gpu_a100-dev      # dev QoS (<=2h). Use qos_gpu_a100-t3 for the full sweep.
+#SBATCH --time=20:00:00
+#SBATCH --qos=qos_gpu_a100-t3       # production QoS; deep configs (8,12)/(6,9) need >2h
 #SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
 
 set -euo pipefail
@@ -37,7 +37,7 @@ H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=graphqa_H${H}_L${L}
 
-# ---- Environment (Jean Zay H100) ------------------------------------
+# ---- Environment (Jean Zay A100) ------------------------------------
 module purge
 module load arch/a100
 module load pytorch-gpu/py3/2.8.0            # <-- must match setup_venv_jeanzay.sh
