@@ -80,7 +80,7 @@ srun python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 
   --config-name cfg_graphqa \
   arch/net@arch=trm \
   arch/size@arch=B \
-  arch.half_layers=True \
+  +arch.half_layers=True \
   data.path=${DATA_DIR} \
   arch.H_cycles=${H} \
   arch.L_cycles=${L} \
