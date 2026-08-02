@@ -1,18 +1,24 @@
 #!/bin/bash
 # =====================================================================
-# HRM-Text L/H recursion ablation on GraphQA (Jean Zay, A100 partition).
+# TRM baseline L/H recursion ablation on GraphQA (Jean Zay, A100 partition).
+#
+# Head-to-head with the HRM ablation: same (H_cycles, L_cycles) grid, and
+# half_layers=True so each config is FLOP-matched to the HRM runs (HRM splits
+# 12 layers across two 6-layer blocks; TRM shares ONE 6-layer block for both
+# the H and L updates -- see models/baselines/trm_nocarry.py). TRM therefore
+# runs on the SAME A100 FlexAttention path as HRM (no code change needed).
 #
 # One SLURM job per (H_cycles, L_cycles) config via a job array. Each job
-# trains a size-B HRM from scratch on graphqa-standard on a single A100.
+# trains a size-B TRM from scratch on graphqa-standard on a single A100.
 #
 # Prerequisites (run once, on a LOGIN node):
 #   - venv built with scripts/setup_venv_jeanzay.sh (torch FlexAttention, no FA3).
 #   - tokenizer downloaded + graphqa tokenized to $SCRATCH/graphqa/std_prepared
 #     via scripts/prepare_graphqa.sh.
 #
-# Submit with:  sbatch slurm/train_graphqa.slurm
+# Submit with:  sbatch slurm/train_graphqa_trm.slurm
 # =====================================================================
-#SBATCH --job-name=hrm_graphqa
+#SBATCH --job-name=trm_graphqa
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 #SBATCH --account=axa@a100          # <-- ADJUST: your A100 allocation
@@ -33,9 +39,15 @@ set -euo pipefail
 # Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
 H_LIST=(2 4 6 8 1 2 3 4 6)
 L_LIST=(3 6 9 12 12 6 4 3 2)
+# TRM has no bp warmup: H_bp_steps/L_bp_steps are fixed per config. Mirror HRM's
+# steady state (total bp budget 5): H_bp = min(H_cycles, 4), L_bp = 5 - H_bp.
+HBP_LIST=(2 4 4 4 1 2 3 4 4)
+LBP_LIST=(3 1 1 1 4 3 2 1 1)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
-RUN=graphqa_H${H}_L${L}
+HBP=${HBP_LIST[$SLURM_ARRAY_TASK_ID]}
+LBP=${LBP_LIST[$SLURM_ARRAY_TASK_ID]}
+RUN=graphqa_trm_H${H}_L${L}
 
 # ---- Environment (Jean Zay A100) ------------------------------------
 module purge
@@ -58,17 +70,21 @@ mkdir -p logs
 DATA_DIR=$SCRATCH/graphqa/std_prepared       # from scripts/prepare_graphqa.sh
 CKPT_DIR=$SCRATCH/graphqa/ckpts/${RUN}
 
-echo "[${RUN}] H_cycles=${H} L_cycles=${L}  data=${DATA_DIR}  ckpt=${CKPT_DIR}"
+echo "[${RUN}] H_cycles=${H} L_cycles=${L}  H_bp=${HBP} L_bp=${LBP}  data=${DATA_DIR}  ckpt=${CKPT_DIR}"
 
-# ---- Launch: single GPU, size B, from scratch -----------------------
-# Use the venv python to run torchrun (module torchrun -> module python, which
-# lacks the venv-only deps like coolname). `python -m torch.distributed.run`
-# == torchrun, but under the venv interpreter, so workers inherit it too.
+# ---- Launch: single GPU, size B, TRM net, from scratch --------------
+# Swap the net to TRM (arch/net@arch=trm) and halve layers so each (H,L) is
+# FLOP-matched to the HRM runs. TRM's bp is fixed (no warmup) -> set H/L bp
+# steps explicitly per config. Everything else mirrors train_graphqa.slurm.
 srun python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 pretrain.py \
   --config-name cfg_graphqa \
+  arch/net@arch=trm \
   arch/size@arch=B \
+  arch.half_layers=True \
   data.path=${DATA_DIR} \
   arch.H_cycles=${H} \
   arch.L_cycles=${L} \
+  arch.H_bp_steps=${HBP} \
+  arch.L_bp_steps=${LBP} \
   run_name=${RUN} \
   checkpoint_path=${CKPT_DIR}
