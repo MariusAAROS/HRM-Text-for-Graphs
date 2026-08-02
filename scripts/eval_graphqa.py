@@ -39,6 +39,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root on sys.path
 
 from models.layers import find_multiple
+from models.flash_attention_prefixlm_v2 import compute_aux_seq_tensors_scalars
 from simple_inference_engine import inference_load_checkpoint
 
 
@@ -95,6 +96,63 @@ def generate(ckpt, condition: str, prompt: str, max_generation: int, pad_multipl
     return ckpt.decode_generation(np.asarray(gen, dtype=np.int64), stop_id)
 
 
+@torch.inference_mode()
+def generate_batch(ckpt, items, max_generation: int, pad_multiple: int = 128) -> list[str]:
+    """Greedy, cache-free generation for a batch of prompts, packed as multiple docs.
+
+    Packs all active prompts as separate documents in one sequence and advances
+    every document by one token per forward, dropping a document once it emits the
+    stop token. This is ~len(items)x fewer forwards than one-at-a-time and bounds
+    runtime even when a model never emits <eoa> (the cause of the 2h eval timeouts).
+    """
+    stop_id = int(ckpt.tokenizer.convert_tokens_to_ids(ckpt.tokenizer_info["eoa"]))
+    prompts = [ckpt.tokenize_prompt(c, p) for (c, p) in items]
+    prompt_lens = [int(p.shape[0]) for p in prompts]
+    gens: list[list[int]] = [[] for _ in items]
+    active = list(range(len(items)))
+
+    for _ in range(max_generation):
+        if not active:
+            break
+        prefix_lens = np.array([prompt_lens[i] for i in active], dtype=np.int32)
+        causal_lens = np.array([len(gens[i]) for i in active], dtype=np.int32)
+        total_lens = prefix_lens + causal_lens
+        total = int(total_lens.sum())
+        S = find_multiple(total, pad_multiple)
+
+        inputs = np.zeros(S, dtype=np.int64)
+        position_ids = np.zeros(S, dtype=np.int64)
+        off = 0
+        for j, i in enumerate(active):
+            L = int(total_lens[j])
+            seq = np.concatenate([prompts[i], np.asarray(gens[i], dtype=prompts[i].dtype)]) if gens[i] else prompts[i]
+            inputs[off:off + L] = seq
+            position_ids[off:off + L] = np.arange(L)
+            off += L
+
+        aux, _ = compute_aux_seq_tensors_scalars(prefix_lens, causal_lens, S)
+        batch = {
+            "inputs": torch.as_tensor(inputs, device="cuda"),
+            "position_ids": torch.as_tensor(position_ids, device="cuda"),
+            "doc_ids": torch.as_tensor(aux["doc_ids"], device="cuda"),
+            "prefix_ends": torch.as_tensor(aux["prefix_ends"], device="cuda"),
+        }
+        _carry, logits = ckpt.model(ckpt.carry, batch)  # [S, vocab]
+        ends = np.cumsum(total_lens) - 1  # global index of each active doc's last token
+        next_ids = logits[torch.as_tensor(ends, device="cuda")].argmax(-1).tolist()
+
+        still = []
+        for j, i in enumerate(active):
+            nid = int(next_ids[j])
+            if nid == stop_id:
+                continue
+            gens[i].append(nid)
+            still.append(i)
+        active = still
+
+    return [ckpt.decode_generation(np.asarray(g, dtype=np.int64), stop_id) for g in gens]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt_path", required=True, help="Directory with fsdp2_epoch_* + all_config.yaml.")
@@ -102,6 +160,7 @@ def main():
     ap.add_argument("--ckpt_epoch", type=int, default=None, help="Epoch to load (default: latest).")
     ap.add_argument("--use_ema", action="store_true", help="Use EMA weights (recommended).")
     ap.add_argument("--max_generation", type=int, default=32, help="Max new tokens for the answer.")
+    ap.add_argument("--batch_size", type=int, default=16, help="Prompts packed per forward (speeds up eval).")
     ap.add_argument("--limit", type=int, default=None, help="Optional cap on number of eval samples.")
     ap.add_argument("--out", default=None, help="Where to write the JSON report.")
     # wandb (opt-in: only active when --wandb_project is set)
@@ -144,12 +203,16 @@ def main():
 
     results = []
     correct = 0
-    for idx, r in enumerate(rows):
-        gold = r["response"]
-        pred = generate(ckpt, r.get("condition", "direct"), r["instruction"], args.max_generation)
-        is_correct = normalize(pred) == normalize(gold)
-        correct += int(is_correct)
-        results.append({"id": idx, "gold": gold, "pred": pred, "correct": is_correct})
+    items = [(r.get("condition", "direct"), r["instruction"]) for r in rows]
+    for start in range(0, len(rows), args.batch_size):
+        preds = generate_batch(ckpt, items[start:start + args.batch_size], args.max_generation)
+        for k, pred in enumerate(preds):
+            idx = start + k
+            gold = rows[idx]["response"]
+            is_correct = normalize(pred) == normalize(gold)
+            correct += int(is_correct)
+            results.append({"id": idx, "gold": gold, "pred": pred, "correct": is_correct})
+        print(f"  [{min(start + args.batch_size, len(rows))}/{len(rows)}] running acc={correct / len(results):.3f}", flush=True)
 
     accuracy = correct / len(rows) if rows else 0.0
     report = {
