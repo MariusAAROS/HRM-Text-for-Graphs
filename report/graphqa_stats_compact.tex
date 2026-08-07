@@ -1,0 +1,33 @@
+\begin{table}[h]
+\centering
+\small
+\caption{GraphQA Dataset Statistics}
+\label{tab:graphqa_dataset_stats}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{Meta-ICL} & \textbf{HRM-Text} & \textbf{Unit} \\
+\midrule
+\multicolumn{5}{l}{\textit{Dataset Size}} \\
+Standard Split & 3,080 & 3,080 & 3,080 & samples \\
+OOD Split & 3,500 & 3,500 & 3,500 & samples \\
+OOD-Pool Split & 3,080 & 3,080 & 3,080 & samples \\
+\textbf{Total} & \textbf{9,660} & \textbf{9,660} & \textbf{9,660} & samples \\
+\midrule
+\multicolumn{5}{l}{\textit{Graph Properties}} \\
+Avg. Nodes & $11.40 \pm 4.43$ & $11.40 \pm 4.43$ & N/A & nodes \\
+Node Range & 5--19 & 5--19 & N/A & nodes \\
+Avg. Edges & $28.72 \pm 32.46$ & $28.72 \pm 32.46$ & N/A & edges \\
+Edge Range & 2--171 & 2--171 & N/A & edges \\
+\midrule
+\multicolumn{5}{l}{\textit{Format \& Features}} \\
+File Format & JSON & JSON & JSONL & - \\
+ICL Examples & None & 32 & None & per sample \\
+Instruction Length & N/A & N/A & $110.20 \pm 67.71$ & words \\
+Response Length & N/A & N/A & $2.16 \pm 2.69$ & words \\
+\midrule
+\multicolumn{5}{l}{\textit{Diversity}} \\
+\# Algorithms & 7 & 7 & - & types \\
+\# Tasks & 11 & 11 & - & types \\
+\bottomrule
+\end{tabular}
+\end{table}

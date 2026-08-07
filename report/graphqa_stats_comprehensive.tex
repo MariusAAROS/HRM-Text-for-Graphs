@@ -1,0 +1,54 @@
+\begin{table*}[h]
+\centering
+\caption{GraphQA Dataset Statistics Summary}
+\label{tab:graphqa_stats}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Aspect} & \textbf{Baseline} & \textbf{Meta-ICL} & \textbf{HRM-Text} & \textbf{Unit} \\
+\midrule
+\multicolumn{5}{l}{\textit{Dataset Size}} \\
+Standard Split & 3,080 & 3,080 & 3,080 & samples \\
+OOD Split & 3,500 & 3,500 & 3,500 & samples \\
+OOD-Pool Split & 3,080 & 3,080 & 3,080 & samples \\
+\textbf{Total} & \textbf{9,660} & \textbf{9,660} & \textbf{9,660} & samples \\
+\midrule
+\multicolumn{5}{l}{\textit{Graph Characteristics}} \\
+Nodes (Mean $\pm$ Std) & $11.40 \pm 4.43$ & $11.40 \pm 4.43$ & N/A & nodes \\
+Nodes (Min--Max) & 5--19 & 5--19 & N/A & nodes \\
+Edges (Mean $\pm$ Std) & $28.72 \pm 32.46$ & $28.72 \pm 32.46$ & N/A & edges \\
+Edges (Min--Max) & 2--171 & 2--171 & N/A & edges \\
+\midrule
+\multicolumn{5}{l}{\textit{Algorithm Distribution}} \\
+Path & 451 & 451 & - & samples \\
+Star & 449 & 449 & - & samples \\
+Barab\'asi--Albert & 447 & 447 & - & samples \\
+Complete & 443 & 443 & - & samples \\
+Scale-Free (SFN) & 437 & 437 & - & samples \\
+Stochastic Block Model & 433 & 433 & - & samples \\
+Erd\H{o}s--R\'enyi & 420 & 420 & - & samples \\
+\midrule
+\multicolumn{5}{l}{\textit{Task Distribution}} \\
+EdgeCount & 295 & 295 & - & samples \\
+EdgeExistence & 288 & 288 & - & samples \\
+Reachability & 286 & 286 & - & samples \\
+NodeCount & 286 & 286 & - & samples \\
+ShortestPath & 283 & 283 & - & samples \\
+MaximumFlow & 281 & 281 & - & samples \\
+ConnectedNodes & 277 & 277 & - & samples \\
+CycleCheck & 275 & 275 & - & samples \\
+DisconnectedNodes & 272 & 272 & - & samples \\
+TriangleCounting & 269 & 269 & - & samples \\
+NodeDegree & 268 & 268 & - & samples \\
+\midrule
+\multicolumn{5}{l}{\textit{Special Features}} \\
+Format & JSON & JSON & JSONL & - \\
+In-Context Examples & None & 32 & None & per sample \\
+Instruction Length (Mean $\pm$ Std) & N/A & N/A & $110.20 \pm 67.71$ & words \\
+Instruction Length (Min--Max) & N/A & N/A & 49--407 & words \\
+Response Length (Mean $\pm$ Std) & N/A & N/A & $2.16 \pm 2.69$ & words \\
+Response Length (Min--Max) & N/A & N/A & 1--18 & words \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
