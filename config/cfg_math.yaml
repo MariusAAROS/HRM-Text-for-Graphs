@@ -1,0 +1,51 @@
+# From-scratch training on MATH (size B) for the L/H recursion ablation.
+#
+# Train data comes from scripts/prepare_benchmark_data.py --benchmark math,
+# whose prompts are byte-identical to the ones evaluation/benchmarks.py::MATH
+# builds at eval time. Responses are direct (the bare \boxed{...} contents),
+# NOT chain-of-thought.
+#
+# Per-run CLI overrides (see slurm/train_math.slurm):
+#   arch/size@arch=B
+#   data.path=$SCRATCH/math/std_prepared
+#   arch.H_cycles=<H> arch.L_cycles=<L>
+#   run_name=math_H<H>_L<L>
+#   checkpoint_path=$SCRATCH/math/ckpts/math_H<H>_L<L>
+defaults:
+  - arch/net@arch: hrm
+  - arch/size@arch: B
+  - data: sft
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# From scratch: no checkpoint to resume from.
+resume_from: null
+
+# W&B grouping (run_name is set per config on the CLI).
+project_name: HRM-MATH-Ablation
+run_name: null
+checkpoint_path: null
+
+global_batch_size: 4096
+# NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
+# Measured MATH train corpus = 0.64M tokens (7496 samples, avg 86 tokens), i.e.
+# 0.7x GraphQA's 0.89M -> 30 epochs ~= 4.7k optimizer steps, matching GraphQA's
+# 20 epochs ~= 4.4k.
+epochs: 30
+checkpoint_interval: 10
+
+# From-scratch LR schedule (identical to GraphQA).
+lr: 3.0e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 200
+
+weight_decay: 0.1
+beta1: 0.9
+beta2: 0.95
+
+ema: 0.999
+
+# Fixed across every config so runs differ ONLY in (H_cycles, L_cycles).
+seed: 0

@@ -5,9 +5,16 @@ from dataclasses import dataclass
 
 from datasets import load_dataset, get_dataset_config_names
 from math_verify import parse, verify
-from lm_eval.tasks.drop.utils import process_results as drop_process_results, process_docs as drop_process_docs
 
 from utils.functions import last_boxed_only_string, compute_benchmark_micro_macro_avg
+
+
+def _drop_utils():
+    # lm-eval is filtered out of the Jean Zay venv (scripts/setup_venv_jeanzay.sh),
+    # so only DROP may depend on it -- import lazily to keep this module importable.
+    from lm_eval.tasks.drop.utils import process_results, process_docs
+    return process_results, process_docs
+
 
 class BaseBenchmark:
     def __init__(self):
@@ -28,7 +35,7 @@ class GSM8k(BaseBenchmark):
     def __init__(self, split: str = "test"):
         super().__init__()
 
-        dataset = load_dataset("gsm8k", "main", split=split)
+        dataset = load_dataset("openai/gsm8k", "main", split=split)
         self.prompts = dataset["question"]
         self.ground_truths = [self._extract_truth(sol) for sol in dataset["answer"]]
 
@@ -109,6 +116,7 @@ class DROP(BaseBenchmark):
 
         dataset = load_dataset("EleutherAI/drop", split=split)
 
+        _, drop_process_docs = _drop_utils()
         self.ground_truths: list[dict[str, Any]] = list(drop_process_docs(dataset))  # pyright: ignore[reportAttributeAccessIssue]
         self.prompts = [
             f"{prefix}{doc['passage']}\nQ: {doc['question']}\nA:" 
@@ -118,6 +126,7 @@ class DROP(BaseBenchmark):
     def compute_metrics(self, generations: list[str]) -> dict:
         total_em, total_f1, total = 0.0, 0.0, len(generations)
 
+        drop_process_results, _ = _drop_utils()
         for i, text in enumerate(generations):
             metrics = drop_process_results(self.ground_truths[i], [text.strip()])
             total_em += metrics.get("em", 0.0)

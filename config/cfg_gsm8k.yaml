@@ -1,0 +1,51 @@
+# From-scratch training on GSM8k (size B) for the L/H recursion ablation.
+#
+# Train data comes from scripts/prepare_benchmark_data.py --benchmark gsm8k,
+# whose prompts are byte-identical to the ones evaluation/benchmarks.py::GSM8k
+# builds at eval time. Responses are direct (the "#### N" final integer only),
+# NOT chain-of-thought.
+#
+# Per-run CLI overrides (see slurm/train_gsm8k.slurm):
+#   arch/size@arch=B
+#   data.path=$SCRATCH/gsm8k/std_prepared
+#   arch.H_cycles=<H> arch.L_cycles=<L>
+#   run_name=gsm8k_H<H>_L<L>
+#   checkpoint_path=$SCRATCH/gsm8k/ckpts/gsm8k_H<H>_L<L>
+defaults:
+  - arch/net@arch: hrm
+  - arch/size@arch: B
+  - data: sft
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# From scratch: no checkpoint to resume from.
+resume_from: null
+
+# W&B grouping (run_name is set per config on the CLI).
+project_name: HRM-GSM8k-Ablation
+run_name: null
+checkpoint_path: null
+
+global_batch_size: 4096
+# NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
+# Measured GSM8k train corpus = 0.54M tokens (7473 samples, avg 72 tokens), i.e.
+# 0.6x GraphQA's 0.89M -> 30 epochs ~= 3.9k optimizer steps, matching GraphQA's
+# 20 epochs ~= 4.4k.
+epochs: 30
+checkpoint_interval: 10
+
+# From-scratch LR schedule (identical to GraphQA).
+lr: 3.0e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 200
+
+weight_decay: 0.1
+beta1: 0.9
+beta2: 0.95
+
+ema: 0.999
+
+# Fixed across every config so runs differ ONLY in (H_cycles, L_cycles).
+seed: 0
