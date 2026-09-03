@@ -22,8 +22,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --time=20:00:00
-#SBATCH --qos=qos_gpu_a100-t3
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev
 #SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
 
 set -euo pipefail
