@@ -11,7 +11,7 @@ set -euo pipefail
 cd $WORK/HRM-Text-for-Graphs
 
 # EPOCHS **must** equal `epochs` in config/cfg_gsm8k.yaml.
-EPOCHS=20
+EPOCHS=15
 DATA_DIR=$SCRATCH/gsm8k/std_prepared
 TRAIN_JSONL=data/gsm8k/hrm-text/train.jsonl
 TOKENIZER=$WORK/HRM-Text-for-Graphs/tokenizer.json
