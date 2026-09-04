@@ -33,7 +33,7 @@ global_batch_size: 4096
 # Measured GSM8k train corpus = 0.54M tokens (7473 samples, avg 72 tokens), i.e.
 # 0.6x GraphQA's 0.89M -> 30 epochs ~= 3.9k optimizer steps, matching GraphQA's
 # 20 epochs ~= 4.4k.
-epochs: 30
+epochs: 20
 checkpoint_interval: 10
 
 # From-scratch LR schedule (identical to GraphQA).
