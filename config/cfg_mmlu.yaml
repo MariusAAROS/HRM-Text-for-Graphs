@@ -34,7 +34,7 @@ global_batch_size: 4096
 # tokens), i.e. 46x GraphQA's 0.89M. A SINGLE epoch is already ~9.9k optimizer
 # steps (2.3x GraphQA's 4.4k), so this is the only dataset trained for 1 epoch.
 # To shrink further, re-run prepare_mmlu.sh with --limit on the converter.
-epochs: 1
+epochs: 5
 checkpoint_interval: 1
 
 # From-scratch LR schedule (identical to GraphQA).

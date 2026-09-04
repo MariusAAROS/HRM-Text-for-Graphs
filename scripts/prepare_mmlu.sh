@@ -11,7 +11,7 @@ set -euo pipefail
 cd $WORK/HRM-Text-for-Graphs
 
 # EPOCHS **must** equal `epochs` in config/cfg_mmlu.yaml.
-EPOCHS=1
+EPOCHS=5
 DATA_DIR=$SCRATCH/mmlu/std_prepared
 TRAIN_JSONL=data/mmlu/hrm-text/train.jsonl
 TOKENIZER=$WORK/HRM-Text-for-Graphs/tokenizer.json
