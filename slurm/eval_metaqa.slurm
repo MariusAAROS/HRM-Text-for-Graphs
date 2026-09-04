@@ -17,8 +17,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --time=10:00:00
-#SBATCH --qos=qos_gpu_a100-t3       # 1194 long prompts at batch 5 does not fit the 2h dev QoS
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev       # 1194 long prompts at batch 5 does not fit the 2h dev QoS
 #SBATCH --array=0-8
 
 set -euo pipefail

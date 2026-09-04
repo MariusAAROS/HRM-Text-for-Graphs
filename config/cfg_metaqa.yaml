@@ -34,7 +34,7 @@ global_batch_size: 4096
 # Measured MetaQA train corpus = 7.64M tokens (7967 samples, avg 958 tokens),
 # i.e. 8.6x GraphQA's 0.89M. 6 epochs ~= 11.2k optimizer steps (GraphQA's 20
 # epochs ~= 4.4k). Lower this (and the matching --epochs) if the 20h job runs out.
-epochs: 6
+epochs: 20
 checkpoint_interval: 2
 
 # From-scratch LR schedule (identical to GraphQA).

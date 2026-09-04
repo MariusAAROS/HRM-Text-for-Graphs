@@ -9,7 +9,7 @@ set -euo pipefail
 cd $WORK/HRM-Text-for-Graphs
 
 # EPOCHS **must** equal `epochs` in config/cfg_metaqa.yaml.
-EPOCHS=6
+EPOCHS=20
 DATA_DIR=$SCRATCH/metaqa/std_prepared
 TOKENIZER=$WORK/HRM-Text-for-Graphs/tokenizer.json
 
