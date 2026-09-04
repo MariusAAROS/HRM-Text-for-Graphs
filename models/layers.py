@@ -112,13 +112,17 @@ class Cache(NamedTuple):
                    values=torch.zeros((max_batch_size, max_seq_len, num_heads, head_dim), **kwargs))
 
 
-def _sdpa_with_kvcache(q: Tensor, k: Tensor, v: Tensor, cache: "Cache", cache_lengths: Tensor, is_causal: bool) -> Tensor:
+def _sdpa_with_kvcache(q: Tensor, k: Tensor, v: Tensor, cache: "Cache", cache_lengths: Tensor | int, is_causal: bool) -> Tensor:
     # Ampere-compatible replacement for flash_attn_with_kvcache. Writes the new
     # k,v into the static cache at [cache_lengths : cache_lengths + Sq], then
     # attends over the valid cache range with SDPA. q/k/v: [B, Sq, H, D].
     B, Sq, H, D = q.shape
     max_seq_len = cache.keys.shape[1]
-    cache_lengths = cache_lengths.reshape(B)
+    # flash_attn_with_kvcache accepts a scalar cache_seqlens; the prefill path relies on that.
+    if isinstance(cache_lengths, Tensor):
+        cache_lengths = cache_lengths.reshape(B).to(torch.long)
+    else:
+        cache_lengths = torch.full((B,), cache_lengths, dtype=torch.long, device=q.device)
 
     positions = cache_lengths[:, None] + torch.arange(Sq, device=q.device)[None, :]  # [B, Sq]
     idx = positions[..., None, None].expand(B, Sq, H, D)
