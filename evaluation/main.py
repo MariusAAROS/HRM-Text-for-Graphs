@@ -26,6 +26,7 @@ class EvaluationConfig(pydantic.BaseModel):
 
     # Reporting (mirrors scripts/eval_graphqa.py so ablation runs are comparable).
     out: Optional[str] = None
+    samples_out: Optional[str] = None
     wandb_project: Optional[str] = None
     wandb_entity: Optional[str] = None
     wandb_name: Optional[str] = None
@@ -42,6 +43,34 @@ class EvaluationConfig(pydantic.BaseModel):
                     raise ValueError(f"Unknown benchmark name in run_only: {b_name}")
 
         return self
+
+
+def _jsonable(value: Any):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def collect_samples(b_name: str, prompts: list[str], generations: list[str], benchmark) -> list[dict]:
+    """Pair every prompt with what the model produced, for manual inspection."""
+    truths = getattr(benchmark, "ground_truths", None) or []
+    # Only some benchmarks (e.g. GSM8k) expose the parser used to score a generation.
+    extract = getattr(benchmark, "_extract_answer", None)
+
+    rows = []
+    for i, (prompt, generation) in enumerate(zip(prompts, generations)):
+        truth = _jsonable(truths[i]) if i < len(truths) else None
+        parsed = _jsonable(extract(generation)) if extract is not None else None
+        rows.append({
+            "benchmark": b_name,
+            "index": i,
+            "prompt": prompt,
+            "generation": generation,
+            "parsed": parsed,
+            "ground_truth": truth,
+            "correct": (parsed == truth) if extract is not None and truth is not None else None,
+        })
+    return rows
 
 
 def read_config_cycles(ckpt_path: Optional[str]) -> tuple[Optional[int], Optional[int]]:
@@ -97,6 +126,7 @@ def main():
 
     # 4. Generate and Evaluate per Group
     all_results = {}
+    all_samples: list[dict] = []
     
     for gen_key, group in grouped_tasks.items():
         gen_kwargs = json.loads(gen_key)
@@ -118,6 +148,10 @@ def main():
             b_generations = generations[start_idx:end_idx]
             metrics = benchmark.compute_metrics(b_generations)
             all_results[b_name] = metrics
+
+            if cfg.samples_out is not None:
+                # prompts (not group["prompts"]) is what the model actually saw, post-template.
+                all_samples.extend(collect_samples(b_name, prompts[start_idx:end_idx], b_generations, benchmark))
 
     # 5. Summary Report
     print("\n" + "#"*50 + "\nEVALUATION SUMMARY\n" + "#"*50)
@@ -144,6 +178,13 @@ def main():
                 "results": all_results,
             }, f, indent=2)
         print(f"\nWrote {cfg.out}")
+
+    if cfg.samples_out is not None:
+        os.makedirs(os.path.dirname(os.path.abspath(cfg.samples_out)), exist_ok=True)
+        with open(cfg.samples_out, "w", encoding="utf-8") as f:
+            for row in all_samples:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"Wrote {len(all_samples)} samples to {cfg.samples_out}")
 
     if cfg.wandb_project is not None:
         import wandb

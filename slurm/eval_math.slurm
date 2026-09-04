@@ -58,6 +58,7 @@ srun python -m evaluation.main \
   ckpt_path=${CKPT_DIR} \
   run_only=[MATH] \
   out=${CKPT_DIR}/eval_test.json \
+  samples_out=${CKPT_DIR}/eval_test_samples.jsonl \
   wandb_project=math-eval \
   wandb_name=${RUN} \
   wandb_tags=[H${H},L${L},ablation]
