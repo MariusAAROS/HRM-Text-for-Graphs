@@ -1,0 +1,32 @@
+# Benchmarking config for the from-scratch L/H ablation checkpoints.
+#
+# Differs from hrm_benchmarking.yaml (which targets the pretrained HRM-Text-1B):
+#   - condition is "direct" everywhere. The ablation models are trained by
+#     scripts/prepare_benchmark_data.py on direct (answer-only) responses and
+#     have never seen the "synth" / "cot" condition tokens.
+#   - only the three benchmarks that have a matching from-scratch train set.
+#
+# Usage (see slurm/eval_{gsm8k,math,mmlu}.slurm):
+#   python -m evaluation.main config=evaluation/config/scratch_benchmarking.yaml \
+#     ckpt_path=<CKPT_DIR> run_only=[GSM8k] out=<CKPT_DIR>/eval_test.json
+engine: SimpleEngine
+ckpt_path: null
+
+generation_config:
+  batch_size: 33
+  max_context: 3072
+  temperature: 0.0
+  condition: "direct"
+
+benchmarks:
+  # Short prompts (GSM8k max 261 tokens, MATH max 1575), answer-only responses.
+  - name: GSM8k
+  - name: MATH
+
+  # Few-shot MCQ: max_tokens is forced to 1 by StandardMCQBenchmark.
+  - name: MMLU
+    generation_config:
+      max_context: 4096
+      batch_size: 1
+    special_shots:
+      high_school_european_history: 3  # MMLU: some tasks have too long context to fit inside model.
