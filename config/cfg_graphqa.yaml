@@ -57,3 +57,13 @@ seed: 0
 # regime (bounded memory), which is required for the deep configs like (8,12).
 # Do NOT raise bp_max_steps to "full backprop" -- (8,12) unrolls 8*12=96 L-steps
 # and would blow up memory. Fixed truncation keeps the ablation fair and feasible.
+
+# Recursion-depth probe. Probe steps run an eager (uncompiled) fwd/bwd, so `interval`
+# must be a multiple of log_interval (5) and coarse enough to stay ~1% of wall clock.
+instrumentation:
+  enabled: true
+  interval: 100
+  token_sample: 8192
+  log_eff_rank: true
+  log_zgrad: true
+  log_param_grads: true

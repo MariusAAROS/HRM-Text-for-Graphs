@@ -20,3 +20,7 @@ beta1: 0.9
 beta2: 0.95
 
 ema: 0.9999
+
+instrumentation:
+  enabled: false  # Off by default at pretrain scale; enable for recursion-regime ablations.
+  interval: 100
