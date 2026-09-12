@@ -49,5 +49,13 @@ beta2: 0.95
 
 ema: 0.999
 
+instrumentation:
+  enabled: true
+  interval: 100
+  token_sample: 8192
+  log_eff_rank: true
+  log_zgrad: true
+  log_param_grads: true
+
 # Fixed across every config so runs differ ONLY in (H_cycles, L_cycles).
 seed: 0
