@@ -25,15 +25,29 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=2:00:00
 #SBATCH --qos=qos_gpu_a100-dev       # production QoS; deep configs (8,12)/(6,9) need >2h
-#SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
+#SBATCH --array=0-5                 # 6 (H,L) configs (see grid below)
 
 set -euo pipefail
 
 # ---- (H,L) grid: array index -> config ------------------------------
-# Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
-# Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
-H_LIST=(2 4 6 8 1 2 3 4 6)
-L_LIST=(3 6 9 12 12 6 4 3 2)
+# [v1] Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
+# [v1] Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+#
+# v2 confirmation subset of the GraphQA 2-D surface (full 16-cell grid runs on
+# GraphQA only; see train_graphqa.slurm). Together with the v1 cells (2,6) and (4,6)
+# this completes the L=6 row for H = 1..6, i.e. the H main effect at fixed L, plus
+# (2,12) off-row and the non-recurrent control (1,1).
+#  idx   H    L   H*L    L/H   H*(L+1)
+#    0   1    6     6   6.00       7
+#    1   3    6    18   2.00      21
+#    2   5    6    30   1.20      35
+#    3   6    6    36   1.00      42
+#    4   2   12    24   6.00      26
+#    5   1    1     1   1.00       2
+H_LIST=(1 3 5 6 2 1)
+L_LIST=(6 6 6 6 12 1)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=kqapro_H${H}_L${L}

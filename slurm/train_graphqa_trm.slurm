@@ -29,20 +29,28 @@
 #SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU
 #SBATCH --hint=nomultithread
 #SBATCH --time=20:00:00
-#SBATCH --qos=qos_gpu_a100-t3       # production QoS; deep configs (8,12)/(6,9) need >2h
-#SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
+#SBATCH --qos=qos_gpu_a100-t3       # production QoS; the deepest config (6,12) needs >2h
+#SBATCH --array=0-15%10             # 16 (H,L) configs (see grid below); %10 = Jean Zay parallel cap
 
 set -euo pipefail
 
 # ---- (H,L) grid: array index -> config ------------------------------
-# Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
-# Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
-H_LIST=(2 4 6 8 1 2 3 4 6)
-L_LIST=(3 6 9 12 12 6 4 3 2)
+# [v1] Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
+# [v1] Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+# [v1] HBP_LIST=(2 4 4 4 1 2 3 4 4)
+# [v1] LBP_LIST=(3 1 1 1 4 3 2 1 1)
+#
+# v2 2-D (H,L) surface -- see train_graphqa.slurm for the full index table and the
+# rationale. Mirrors the HRM grid exactly so the two models stay comparable cell by cell.
+H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
+L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
 # TRM has no bp warmup: H_bp_steps/L_bp_steps are fixed per config. Mirror HRM's
 # steady state (total bp budget 5): H_bp = min(H_cycles, 4), L_bp = 5 - H_bp.
-HBP_LIST=(2 4 4 4 1 2 3 4 4)
-LBP_LIST=(3 1 1 1 4 3 2 1 1)
+# v2 additionally clamps L_bp to L_cycles, which v1 never needed (it had no L=1 cell).
+HBP_LIST=(1 3 4 1 3 4 4 2 3 4 4 1 2 4 1 2)
+LBP_LIST=(3 2 1 4 2 1 1 3 2 1 1 1 1 1 4 3)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 HBP=${HBP_LIST[$SLURM_ARRAY_TASK_ID]}
