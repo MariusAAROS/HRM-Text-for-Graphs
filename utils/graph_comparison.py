@@ -2,30 +2,44 @@
 Graph Dataset Structural Comparison
 ====================================
 
-Compares two collections of NetworkX graphs (e.g. two datasets of molecules,
-ego-networks, etc.) by computing per-graph structural statistics, comparing
-their distributions visually and statistically, and optionally computing
-Maximum Mean Discrepancy (MMD) on degree distributions — the standard metric
-used in the graph-generation literature (GraphRNN, GRAN, etc.) for comparing
-two populations of graphs.
+Compares two OR MORE collections of NetworkX graphs (e.g. datasets of
+molecules, ego-networks, etc.) by computing per-graph structural statistics,
+comparing their distributions visually and statistically, and optionally
+computing Maximum Mean Discrepancy (MMD) on degree distributions — the
+standard metric used in the graph-generation literature (GraphRNN, GRAN,
+etc.) for comparing populations of graphs.
 
-Usage
------
+Usage (2 or more datasets)
+---------------------------
+    from graph_comparison import GraphDatasetComparison
+
+    comp = GraphDatasetComparison({
+        "Dataset A": graphs_a,
+        "Dataset B": graphs_b,
+        "Dataset C": graphs_c,          # any number of datasets, 2+
+    })
+    results = comp.compare(run_mmd=True)
+
+    results["summary"]         # mean/std/min/max per statistic, per dataset
+    results["pairwise_tests"]  # KS test, Wasserstein, Cohen's d for every dataset pair
+    results["raw_data"]        # tidy per-graph stats table (one row per graph)
+    results["mmd_matrix"]      # pairwise MMD^2 matrix (only if run_mmd=True)
+
+Usage (exactly 2 datasets, old API)
+-------------------------------------
     from graph_comparison import compare_graph_datasets
 
     results = compare_graph_datasets(
         graphs_a, graphs_b,
         label_a="Dataset A", label_b="Dataset B",
     )
-
-    results["summary"]   # mean/std/min/max per statistic, per dataset
-    results["tests"]     # KS test, Wasserstein distance, Cohen's d per statistic
-    results["raw_data"]  # full per-graph stats table (tidy, one row per graph)
+    results["tests"]  # KS test, Wasserstein distance, Cohen's d per statistic
 
 Requires: networkx, numpy, pandas, scipy, matplotlib
 """
 
 import warnings
+import itertools
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -185,31 +199,80 @@ def compare_distributions(df_a, df_b, stat_cols):
 # Visualization
 # ----------------------------------------------------------------------
 
-def plot_distributions(df, stat_cols, label_a, label_b, save_path=None, bins=20):
+def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
+                        log_y="auto", log_y_threshold=20):
+    """
+    Parameters
+    ----------
+    log_y : "auto" | True | False
+        "auto" (default): each subplot independently switches to a log
+        y-axis if one dataset's histogram peak is more than `log_y_threshold`
+        times taller than the smallest nonzero bar in that subplot — this is
+        what keeps a low, spread-out distribution from being flattened to
+        invisibility next to another dataset's sharp spike.
+        True: always use log y-axis. False: never (old behavior).
+    log_y_threshold : float
+        Peak-to-smallest-bar ratio that triggers auto log-scaling.
+    """
     n = len(stat_cols)
-    ncols = 3
     nrows = int(np.ceil(n / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows))
     axes = np.array(axes).reshape(-1)
 
+    cmap = plt.get_cmap("tab10" if len(labels) <= 10 else "tab20")
+    colors = {label: cmap(i % cmap.N) for i, label in enumerate(labels)}
+
     for i, col in enumerate(stat_cols):
         ax = axes[i]
         any_plotted = False
+        heights = []
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             with np.errstate(all="ignore"):
-                for label, color in [(label_a, "tab:blue"), (label_b, "tab:orange")]:
+                # Collect finite values per dataset first, so every dataset
+                # in this subplot shares the same bin edges — without this,
+                # each dataset's histogram silently uses its own x-range,
+                # making the bars not directly comparable.
+                per_label_vals = {}
+                all_vals = []
+                for label in labels:
                     vals = df.loc[df["dataset"] == label, col].to_numpy(dtype=float)
                     vals = vals[np.isfinite(vals)]
                     if len(vals) == 0:
                         continue
-                    ax.hist(vals, bins=bins, alpha=0.5, label=label, color=color, density=True)
-                    any_plotted = True
+                    per_label_vals[label] = vals
+                    all_vals.append(vals)
+
+                if all_vals:
+                    combined = np.concatenate(all_vals)
+                    lo, hi = combined.min(), combined.max()
+                    if lo == hi:
+                        pad = 0.5 if lo == 0 else abs(lo) * 0.05 + 1e-9
+                        lo, hi = lo - pad, hi + pad
+                    shared_edges = np.linspace(lo, hi, bins + 1)
+
+                    for label in labels:
+                        vals = per_label_vals.get(label)
+                        if vals is None:
+                            continue
+                        counts, _, _ = ax.hist(vals, bins=shared_edges, alpha=0.5,
+                                                label=label, color=colors[label], density=True)
+                        heights.append(np.asarray(counts))
+                        any_plotted = True
+
+                if any_plotted and log_y in (True, "auto"):
+                    positive = np.concatenate(heights)
+                    positive = positive[positive > 0]
+                    if len(positive) > 0:
+                        ratio = positive.max() / positive.min()
+                        if log_y is True or ratio > log_y_threshold:
+                            ax.set_yscale("log")
+
         ax.set_title(col, fontsize=10)
         ax.set_xlabel(col, fontsize=8)
-        ax.set_ylabel("probability density", fontsize=8)
+        ax.set_ylabel("probability density" + (" (log)" if ax.get_yscale() == "log" else ""), fontsize=8)
         if any_plotted:
-            ax.legend(fontsize=8)
+            ax.legend(fontsize=7)
         else:
             ax.text(0.5, 0.5, "no finite values", ha="center", va="center",
                      transform=ax.transAxes, fontsize=8, color="gray")
@@ -272,8 +335,140 @@ def compute_mmd_degree(graphs_a, graphs_b, sigma=1.0, max_graphs=200, random_sta
 
 
 # ----------------------------------------------------------------------
-# Main entry point
+# Main entry point: GraphDatasetComparison (supports 2..N datasets)
 # ----------------------------------------------------------------------
+
+class GraphDatasetComparison:
+    """
+    Compare structural statistics across two or more collections of
+    NetworkX graphs (e.g. molecules, ego-networks, citation graphs, etc.).
+
+    Usage
+    -----
+        comp = GraphDatasetComparison({
+            "Dataset A": graphs_a,
+            "Dataset B": graphs_b,
+            "Dataset C": graphs_c,          # any number of datasets, 2+
+        })
+
+        comp.summary()          # mean/std/min/max per stat, per dataset
+        comp.pairwise_tests()   # KS test, Wasserstein, Cohen's d for EVERY pair of datasets
+        comp.plot()             # one grid of overlaid histograms, all datasets together
+        comp.mmd_matrix()       # optional, pairwise MMD^2 matrix on degree distributions
+
+        # or get everything in one call:
+        results = comp.compare(run_mmd=True)
+    """
+
+    def __init__(self, datasets):
+        """
+        Parameters
+        ----------
+        datasets : dict[str, list[nx.Graph]]
+            Mapping from dataset label -> list of NetworkX graphs. Must
+            contain at least 2 datasets.
+        """
+        if len(datasets) < 2:
+            raise ValueError("Need at least 2 datasets to compare.")
+        self.datasets = dict(datasets)
+        self.labels = list(self.datasets.keys())
+        self._raw_data = None  # computed lazily, cached
+
+    @property
+    def raw_data(self):
+        """Tidy per-graph stats DataFrame across all datasets (one row per graph)."""
+        if self._raw_data is None:
+            dfs = [compute_stats(graphs, label) for label, graphs in self.datasets.items()]
+            self._raw_data = pd.concat(dfs, ignore_index=True)
+        return self._raw_data
+
+    @property
+    def stat_cols(self):
+        return [c for c in self.raw_data.columns if c not in ("graph_id", "dataset")]
+
+    def summary(self):
+        """Mean/std/min/max per statistic, per dataset."""
+        df = self.raw_data
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            with np.errstate(all="ignore"):
+                return (
+                    df.groupby("dataset")[self.stat_cols]
+                    .agg(["mean", "std", "min", "max"])
+                    .loc[self.labels]
+                )
+
+    def pairwise_tests(self):
+        """
+        KS test, Wasserstein distance, and Cohen's d per statistic, for
+        every pair of datasets (C(n, 2) pairs). Sorted within each pair by
+        Wasserstein distance, so the most-divergent statistics surface first.
+        """
+        df = self.raw_data
+        rows = []
+        for label_a, label_b in itertools.combinations(self.labels, 2):
+            df_a = df[df["dataset"] == label_a]
+            df_b = df[df["dataset"] == label_b]
+            pair = compare_distributions(df_a, df_b, self.stat_cols)
+            pair.insert(0, "dataset_b", label_b)
+            pair.insert(0, "dataset_a", label_a)
+            rows.append(pair)
+        if not rows:
+            return pd.DataFrame()
+        return pd.concat(rows, ignore_index=True)
+
+    def plot(self, save_path=None, bins=20, ncols=3, log_y="auto", log_y_threshold=20):
+        """Grid of overlaid distribution plots, one subplot per statistic, all datasets together.
+
+        log_y : "auto" (default) switches a subplot to a log y-axis when one
+        dataset's peak is much taller than another's — otherwise a
+        low/spread-out distribution can get visually flattened to nothing
+        next to a sharp spike. Pass True/False to force it on/off everywhere.
+        """
+        return plot_distributions(self.raw_data, self.stat_cols, self.labels,
+                                   save_path=save_path, bins=bins, ncols=ncols,
+                                   log_y=log_y, log_y_threshold=log_y_threshold)
+
+    def mmd_matrix(self, sigma=1.0, max_graphs=200, random_state=0):
+        """
+        Symmetric DataFrame of pairwise MMD^2 (degree-distribution based)
+        between every pair of datasets. Diagonal is 0 by definition.
+
+        NOTE: O(n^2) per pair in number of graphs (see compute_mmd_degree) —
+        for many datasets and/or large collections this can be slow.
+        """
+        mat = pd.DataFrame(0.0, index=self.labels, columns=self.labels)
+        for label_a, label_b in itertools.combinations(self.labels, 2):
+            val = compute_mmd_degree(
+                self.datasets[label_a], self.datasets[label_b],
+                sigma=sigma, max_graphs=max_graphs, random_state=random_state,
+            )
+            mat.loc[label_a, label_b] = val
+            mat.loc[label_b, label_a] = val
+        return mat
+
+    def compare(self, plot=True, save_path=None, run_mmd=False, mmd_kwargs=None, plot_kwargs=None):
+        """
+        Run the full comparison and return a dict with keys:
+            "raw_data"        : tidy per-graph stats DataFrame, all datasets
+            "summary"         : mean/std/min/max per statistic per dataset
+            "pairwise_tests"  : KS test, Wasserstein, Cohen's d for every dataset pair
+            "mmd_matrix"      : pairwise MMD^2 matrix (only if run_mmd=True)
+            "figure"          : matplotlib Figure (only if plot=True)
+        """
+        results = {
+            "raw_data": self.raw_data,
+            "summary": self.summary(),
+            "pairwise_tests": self.pairwise_tests(),
+        }
+        if plot:
+            plot_kwargs = plot_kwargs or {}
+            results["figure"] = self.plot(save_path=save_path, **plot_kwargs)
+        if run_mmd:
+            mmd_kwargs = mmd_kwargs or {}
+            results["mmd_matrix"] = self.mmd_matrix(**mmd_kwargs)
+        return results
+
 
 def compare_graph_datasets(
     graphs_a,
@@ -286,17 +481,8 @@ def compare_graph_datasets(
     mmd_kwargs=None,
 ):
     """
-    Full structural comparison of two lists of NetworkX graphs.
-
-    Parameters
-    ----------
-    graphs_a, graphs_b : list of nx.Graph / nx.DiGraph
-    label_a, label_b   : str, dataset names used in plots/tables
-    plot                : bool, whether to render distribution plots
-    save_path           : optional path to save the plot figure (e.g. "compare.png")
-    run_mmd              : bool, whether to also compute MMD on degree distributions
-                            (slower — O(n^2) pairwise EMD; off by default)
-    mmd_kwargs           : dict of kwargs passed to compute_mmd_degree
+    Backward-compatible convenience wrapper for comparing exactly two
+    datasets. For 3+ datasets, use GraphDatasetComparison directly.
 
     Returns
     -------
@@ -307,27 +493,14 @@ def compare_graph_datasets(
         "mmd"      : MMD^2 on degree distributions (only if run_mmd=True)
         "figure"   : matplotlib Figure (only if plot=True)
     """
-    df_a = compute_stats(graphs_a, label_a)
-    df_b = compute_stats(graphs_b, label_b)
-    df = pd.concat([df_a, df_b], ignore_index=True)
+    comp = GraphDatasetComparison({label_a: graphs_a, label_b: graphs_b})
+    results = comp.compare(plot=plot, save_path=save_path, run_mmd=run_mmd, mmd_kwargs=mmd_kwargs)
 
-    stat_cols = [c for c in df.columns if c not in ("graph_id", "dataset")]
+    tests = results.pop("pairwise_tests")
+    results["tests"] = tests.drop(columns=["dataset_a", "dataset_b"], errors="ignore")
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        with np.errstate(all="ignore"):
-            summary = df.groupby("dataset")[stat_cols].agg(["mean", "std", "min", "max"])
-    tests = compare_distributions(df_a, df_b, stat_cols)
-
-    results = {"raw_data": df, "summary": summary, "tests": tests}
-
-    if plot:
-        fig = plot_distributions(df, stat_cols, label_a, label_b, save_path=save_path)
-        results["figure"] = fig
-
-    if run_mmd:
-        mmd_kwargs = mmd_kwargs or {}
-        results["mmd"] = compute_mmd_degree(graphs_a, graphs_b, **mmd_kwargs)
+    if "mmd_matrix" in results:
+        results["mmd"] = float(results.pop("mmd_matrix").loc[label_a, label_b])
 
     return results
 
@@ -339,21 +512,37 @@ def compare_graph_datasets(
 if __name__ == "__main__":
     # Small synthetic example so you can see the expected output shape.
     rng = np.random.default_rng(0)
-    graphs_a = [nx.erdos_renyi_graph(rng.integers(15, 30), 0.15, seed=int(s))
-                for s in rng.integers(0, 1e6, size=40)]
-    graphs_b = [nx.barabasi_albert_graph(rng.integers(15, 30), 2, seed=int(s))
-                for s in rng.integers(0, 1e6, size=40)]
 
-    results = compare_graph_datasets(
-        graphs_a, graphs_b,
-        label_a="Erdos-Renyi", label_b="Barabasi-Albert",
-        plot=True, save_path="demo_comparison.png",
-        run_mmd=True,
-    )
+    def make_graphs(gen_func, n_graphs=40):
+        return [gen_func(int(rng.integers(15, 30)), seed=int(s))
+                for s in rng.integers(0, 1_000_000, size=n_graphs)]
+
+    graphs_a = make_graphs(lambda n, seed: nx.erdos_renyi_graph(n, 0.15, seed=seed))
+    graphs_b = make_graphs(lambda n, seed: nx.barabasi_albert_graph(n, 2, seed=seed))
+    graphs_c = make_graphs(lambda n, seed: nx.watts_strogatz_graph(n, 4, 0.1, seed=seed))
+
+    print("############ N-dataset class API (3 datasets) ############")
+    comp = GraphDatasetComparison({
+        "Erdos-Renyi": graphs_a,
+        "Barabasi-Albert": graphs_b,
+        "Watts-Strogatz": graphs_c,
+    })
+    results = comp.compare(plot=True, save_path="demo_comparison.png", run_mmd=True,
+                            mmd_kwargs={"max_graphs": 40})
 
     print("=== Summary stats ===")
     print(results["summary"])
-    print("\n=== Distribution tests (sorted by Wasserstein distance) ===")
-    print(results["tests"].to_string(index=False))
-    print("\n=== MMD^2 on degree distributions ===")
-    print(results["mmd"])
+    print("\n=== Pairwise tests (top rows per pair, sorted by Wasserstein distance) ===")
+    print(results["pairwise_tests"].groupby(["dataset_a", "dataset_b"]).head(3).to_string(index=False))
+    print("\n=== MMD^2 matrix on degree distributions ===")
+    print(results["mmd_matrix"])
+
+    print("\n############ Backward-compatible 2-dataset function API ############")
+    old_results = compare_graph_datasets(
+        graphs_a, graphs_b,
+        label_a="Erdos-Renyi", label_b="Barabasi-Albert",
+        plot=False, run_mmd=True,
+    )
+    print("=== tests (top 3 by Wasserstein distance) ===")
+    print(old_results["tests"].head(3).to_string(index=False))
+    print("MMD:", old_results["mmd"])
