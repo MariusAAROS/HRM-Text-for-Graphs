@@ -53,10 +53,14 @@ seed: 0
 
 # Backprop-through-time policy (from config/arch/net/hrm.yaml):
 #   bp_warmup_ratio=0.2, bp_min_steps=2, bp_max_steps=5.
-# Kept FIXED across all configs. This is HRM's native truncated 1-step-gradient
-# regime (bounded memory), which is required for the deep configs like (8,12).
-# Do NOT raise bp_max_steps to "full backprop" -- (8,12) unrolls 8*12=96 L-steps
-# and would blow up memory. Fixed truncation keeps the ablation fair and feasible.
+# Kept FIXED across all configs of the main ablation grid. This is HRM's native truncated
+# 1-step-gradient regime (bounded memory), which is required for the deep configs like (8,12):
+# (8,12) unrolls 8*12=96 L-steps and full backprop through it would blow up memory.
+#
+# The truncated budget is itself a confound: it shrinks as H_cycles grows, so "deeper hurts"
+# and "less gradient signal hurts" are not separable within this grid. The de-confounding arm
+# is run separately via `arch.full_backprop=True arch.grad_checkpointing=True`
+# (see slurm/train_graphqa_fullbp.slurm), on a shallower subset that fits in memory.
 
 # Recursion-depth probe. Probe steps run an eager (uncompiled) fwd/bwd, so `interval`
 # must be a multiple of log_interval (5) and coarse enough to stay ~1% of wall clock.

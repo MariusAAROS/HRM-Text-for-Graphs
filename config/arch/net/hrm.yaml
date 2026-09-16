@@ -10,3 +10,12 @@ H_override: {}
 
 bp_warmup_ratio: 0.2
 bp_max_steps: 5
+
+# Backprop-through-time budget. `full_backprop: True` backprops through every cycle and
+# disables the bp warmup above. Alternatively set H_bp_steps/L_bp_steps explicitly (-1 = all);
+# L_bp_steps counts the last N L-applications across ALL H cycles, so its max is H_cycles*L_cycles.
+full_backprop: False
+# H_bp_steps: null
+# L_bp_steps: null
+
+grad_checkpointing: False

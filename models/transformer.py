@@ -3,6 +3,7 @@ import math
 
 import torch
 import torch.nn.functional as F
+import torch.utils.checkpoint
 from torch import Tensor, nn
 from pydantic import BaseModel
 
@@ -37,6 +38,9 @@ class TransformerConfig(BaseModel):
 
     pos_emb_type: Literal["rope", "none"]
     rope_theta: Optional[float] = None
+
+    # Recompute layer activations in the backward pass. Needed to fit deep full-backprop recurrences.
+    grad_checkpointing: bool = False
 
     # [Computed properties]
     @property
@@ -109,6 +113,7 @@ class Transformer(nn.Module):
 
         # Layers
         self.layers = nn.ModuleList([TransformerBlock(config) for _layer_idx in range(config.n_layers)])
+        self.grad_checkpointing = config.grad_checkpointing
 
         # Use final norm only for prenorm
         self.norm_f = lambda x: x
@@ -121,8 +126,15 @@ class Transformer(nn.Module):
     def forward(self, x: Tensor, cache: Optional[list[Cache]] = None, **seq_info) -> Tensor:
         seq_info["cos_sin"] = self.rotary_emb(seq_info.pop("position_ids", None)) if hasattr(self, "rotary_emb") else None
 
+        # Recompute would double-write the mutable KV cache, so never checkpoint a cached (decode) pass.
+        checkpointing = self.grad_checkpointing and cache is None and torch.is_grad_enabled()
+
         # Forward layers
         for layer_id, layer in enumerate(self.layers):
-            x = layer(x, **seq_info, cache=cache[layer_id] if cache is not None else None)
+            layer_cache = cache[layer_id] if cache is not None else None
+            if checkpointing:
+                x = torch.utils.checkpoint.checkpoint(layer, x, **seq_info, cache=layer_cache, use_reentrant=False)
+            else:
+                x = layer(x, **seq_info, cache=layer_cache)
 
         return self.norm_f(x)
