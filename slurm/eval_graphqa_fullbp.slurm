@@ -19,14 +19,14 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
 #SBATCH --qos=qos_gpu_a100-dev
-#SBATCH --array=0-7                 # indices 0-3 = HRM, 4-7 = TRM
+#SBATCH --array=0-3                 # indices 0-3 = HRM
 
 set -euo pipefail
 
 # Same 4 cells as training, once per family.
-H_LIST=(2 3 4 6 2 3 4 6)
-L_LIST=(6 6 6 6 6 6 6 6)
-FAM_LIST=(hrm hrm hrm hrm trm trm trm trm)
+H_LIST=(2 3 4 6)
+L_LIST=(6 6 6 6)
+FAM_LIST=(hrm hrm hrm hrm)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 FAM=${FAM_LIST[$SLURM_ARRAY_TASK_ID]}

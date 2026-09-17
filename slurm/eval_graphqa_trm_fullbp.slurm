@@ -1,13 +1,13 @@
 #!/bin/bash
 # =====================================================================
-# Evaluate the trained GraphQA ablation checkpoints (exact-match accuracy).
-# Mirrors the training job array: one eval job per (H,L) config.
+# Evaluate the full-backprop GraphQA checkpoints (exact-match accuracy).
+# Mirrors train_graphqa_fullbp.slurm / train_graphqa_trm_fullbp.slurm: one eval
+# job per (family, H, L) cell.
 #
-# Run AFTER train_graphqa.slurm has produced checkpoints. Submit with:
-#   sbatch slurm/eval_graphqa.slurm
-# (or chain: sbatch --dependency=afterok:<train_jobid> slurm/eval_graphqa.slurm)
+# Run AFTER both full-backprop training arrays have produced checkpoints:
+#   sbatch slurm/eval_graphqa_fullbp.slurm
 # =====================================================================
-#SBATCH --job-name=hrm_graphqa_eval
+#SBATCH --job-name=graphqa_fullbp_eval
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 #SBATCH --account=axa@a100          # <-- ADJUST: your A100 allocation
@@ -19,20 +19,24 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
 #SBATCH --qos=qos_gpu_a100-dev
-#SBATCH --array=0-15%10
+#SBATCH --array=0-3                # indices 0-3 = TRM
 
 set -euo pipefail
 
-# Same grid as training -- see train_graphqa.slurm for the v2 index table.
-# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
-# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
-# [v2] H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
-# [v2] L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
-H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
-L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
+# Same 4 cells as training, once per family.
+H_LIST=(2 3 4 6)
+L_LIST=(6 6 6 6)
+FAM_LIST=(trm trm trm trm)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
-RUN=graphqa_H${H}_L${L}
+FAM=${FAM_LIST[$SLURM_ARRAY_TASK_ID]}
+
+# Run names must match the training scripts exactly: HRM has no family infix.
+if [[ "${FAM}" == "trm" ]]; then
+  RUN=graphqa_trm_H${H}_L${L}_fullbp
+else
+  RUN=graphqa_H${H}_L${L}_fullbp
+fi
 
 module purge
 module load arch/a100
@@ -62,5 +66,5 @@ srun python scripts/eval_graphqa.py \
   --use_ema \
   --max_generation 32 \
   --wandb_project graphqa-eval \
-  --wandb_tags H${H} L${L} ablation \
+  --wandb_tags H${H} L${L} ${FAM} fullbp ablation \
   --out ${CKPT_DIR}/eval_test.json

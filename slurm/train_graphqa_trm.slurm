@@ -44,8 +44,12 @@ set -euo pipefail
 #
 # v2 2-D (H,L) surface -- see train_graphqa.slurm for the full index table and the
 # rationale. Mirrors the HRM grid exactly so the two models stay comparable cell by cell.
-H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
-L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+# [v2] H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
+# [v2] L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
+H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
+L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
 # TRM has no bp warmup: H_bp_steps/L_bp_steps are fixed per config. Mirror HRM's
 # steady state (total bp budget 5): H_bp = min(H_cycles, 4), L_bp = 5 - H_bp.
 # v2 additionally clamps L_bp to L_cycles, which v1 never needed (it had no L=1 cell).
