@@ -5,6 +5,10 @@ a small list), so greedy decoding + normalized exact match is the natural
 metric. There is no in-training eval loop in pretrain.py, so this is run
 separately (see slurm/eval_graphqa.slurm).
 
+Set-based precision/recall/F1/hits@1 over '|'-joined answers are reported
+alongside accuracy for the multi-answer variants (e.g. metaqa-gold-5); on
+single-answer data they degenerate to the exact-match number.
+
 The recursion depth (H_cycles / L_cycles) is read from the checkpoint's
 all_config.yaml, so it automatically matches how the model was trained --
 nothing to pass on the CLI.
@@ -48,6 +52,27 @@ def normalize(text: str) -> str:
     text = text.strip().lower()
     text = re.sub(r"\s+", " ", text)
     return text.rstrip(" .")
+
+
+def answer_list(text: str) -> list[str]:
+    """Split a '|'-joined answer string into normalized answers, order preserved."""
+    return [a for a in (normalize(part) for part in text.split("|")) if a]
+
+
+def set_scores(pred: str, label: str) -> tuple[float, float, float, float]:
+    """Precision / recall / F1 / hits@1 between two separator-joined answer lists.
+
+    Degenerates to normalized exact match on single-answer datasets, so it is safe
+    to log everywhere.
+    """
+    gold, got = set(answer_list(label)), answer_list(pred)
+    if not gold:
+        return 0.0, 0.0, 0.0, 0.0
+    hit = len(gold & set(got))
+    precision = hit / len(got) if got else 0.0
+    recall = hit / len(gold)
+    f1 = 2 * precision * recall / (precision + recall) if hit else 0.0
+    return precision, recall, f1, float(bool(got) and got[0] in gold)
 
 
 def read_config_cycles(ckpt_path: str) -> tuple[Optional[int], Optional[int]]:
@@ -203,6 +228,7 @@ def main():
 
     results = []
     correct = 0
+    sum_p = sum_r = sum_f1 = sum_hits1 = 0.0
     items = [(r.get("condition", "direct"), r["instruction"]) for r in rows]
     for start in range(0, len(rows), args.batch_size):
         preds = generate_batch(ckpt, items[start:start + args.batch_size], args.max_generation)
@@ -211,10 +237,21 @@ def main():
             gold = rows[idx]["response"]
             is_correct = normalize(pred) == normalize(gold)
             correct += int(is_correct)
-            results.append({"id": idx, "gold": gold, "pred": pred, "correct": is_correct})
-        print(f"  [{min(start + args.batch_size, len(rows))}/{len(rows)}] running acc={correct / len(results):.3f}", flush=True)
+            p, r, f1, hits1 = set_scores(pred, gold)
+            sum_p += p
+            sum_r += r
+            sum_f1 += f1
+            sum_hits1 += hits1
+            results.append({"id": idx, "gold": gold, "pred": pred, "correct": is_correct,
+                            "precision": p, "recall": r, "f1": f1, "hits_at_1": hits1})
+        print(f"  [{min(start + args.batch_size, len(rows))}/{len(rows)}] "
+              f"running acc={correct / len(results):.3f} f1={sum_f1 / len(results):.3f}", flush=True)
 
     accuracy = correct / len(rows) if rows else 0.0
+    precision = sum_p / len(rows) if rows else 0.0
+    recall = sum_r / len(rows) if rows else 0.0
+    f1 = sum_f1 / len(rows) if rows else 0.0
+    hits_at_1 = sum_hits1 / len(rows) if rows else 0.0
     report = {
         "ckpt_path": args.ckpt_path,
         "data": args.data,
@@ -224,21 +261,29 @@ def main():
         "n": len(rows),
         "correct": correct,
         "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "hits_at_1": hits_at_1,
         "use_ema": args.use_ema,
         "samples": results,
     }
 
     print(f"H_cycles={H_cycles} L_cycles={L_cycles}  "
-          f"accuracy = {accuracy:.4f} ({correct}/{len(rows)})")
+          f"accuracy = {accuracy:.4f} ({correct}/{len(rows)})  "
+          f"P = {precision:.4f}  R = {recall:.4f}  F1 = {f1:.4f}  hits@1 = {hits_at_1:.4f}")
 
     # ---- wandb log ----------------------------------------------------------
     if use_wandb:
-        wandb.log({"eval/accuracy": accuracy, "eval/correct": correct, "eval/n": len(rows)})
+        wandb.log({"eval/accuracy": accuracy, "eval/correct": correct, "eval/n": len(rows),
+                   "eval/precision": precision, "eval/recall": recall, "eval/f1": f1,
+                   "eval/hits_at_1": hits_at_1})
 
         # Per-sample table for drill-down in the wandb UI
-        table = wandb.Table(columns=["id", "gold", "pred", "correct"])
+        table = wandb.Table(columns=["id", "gold", "pred", "correct", "precision", "recall", "f1", "hits_at_1"])
         for r in results:
-            table.add_data(r["id"], r["gold"], r["pred"], r["correct"])
+            table.add_data(r["id"], r["gold"], r["pred"], r["correct"],
+                           r["precision"], r["recall"], r["f1"], r["hits_at_1"])
         wandb.log({"eval/samples": table})
         wandb.finish()
 
