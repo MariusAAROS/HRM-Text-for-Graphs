@@ -128,6 +128,10 @@ class Transformer(nn.Module):
 
         # Recompute would double-write the mutable KV cache, so never checkpoint a cached (decode) pass.
         checkpointing = self.grad_checkpointing and cache is None and torch.is_grad_enabled()
+        if checkpointing and seq_info["cos_sin"] is not None:
+            # FSDP2 casts buffers inside its forward hooks but those do not re-run during the AC
+            # recompute, so pin the RoPE dtype here to keep saved and recomputed metadata identical.
+            seq_info["cos_sin"] = tuple(t.to(x.dtype) for t in seq_info["cos_sin"])
 
         # Forward layers
         for layer_id, layer in enumerate(self.layers):
