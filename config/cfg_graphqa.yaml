@@ -27,6 +27,10 @@ project_name: HRM-GraphQA-Ablation
 run_name: null
 checkpoint_path: null
 
+# "step" traces the whole unrolled recurrence into one graph; the full-backprop arm
+# overrides this to "block" on the CLI (see slurm/train_graphqa_fullbp.slurm).
+compile_scope: step
+
 # GraphQA is a small, narrow task -> more epochs, modest token batch.
 # NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
 # global_batch_size = packed tokens per step = FlexAttention sequence length S.
