@@ -25,10 +25,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU (RAM is granted proportionally)
 #SBATCH --hint=nomultithread
 #SBATCH --time=2:00:00
-#SBATCH --qos=qos_gpu_a100-dev
+#SBATCH --qos=qos_gpu_a100-dev       # production QoS; full backprop through 42 cycles needs >>2h
 #SBATCH --array=0-3                 # 4 (H,L) configs straddling the H=3 -> H=4 cliff
 
 set -euo pipefail
@@ -63,6 +63,19 @@ export TMPDIR=$JOBSCRATCH
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
+# ---- Host-RAM guardrails for torch.compile -------------------------
+# os.cpu_count() reports the whole node (not the cgroup), so Inductor would spawn
+# min(32, 64) = 32 compile workers, each a full torch process (~2 GB RSS). That alone
+# exceeds the job's memory allocation and gets the step SIGKILLed by the cgroup OOM
+# killer mid-training, which is what the -9 / "oom_kill event" failures were.
+export TORCHINDUCTOR_COMPILE_THREADS=4
+
+# Default inductor/triton caches live under $TMPDIR (=$JOBSCRATCH, wiped per job) and
+# $HOME, so every array task re-paid the full compile. Persist them on $SCRATCH instead.
+export TORCHINDUCTOR_CACHE_DIR=$SCRATCH/torch_caches/inductor
+export TRITON_CACHE_DIR=$SCRATCH/torch_caches/triton
+mkdir -p $TORCHINDUCTOR_CACHE_DIR $TRITON_CACHE_DIR
+
 cd $WORK/HRM-Text-for-Graphs
 mkdir -p logs
 
@@ -73,6 +86,10 @@ CKPT_DIR=$SCRATCH/graphqa/ckpts/${RUN}       # _fullbp suffix: never collides wi
 echo "[${RUN}] H_cycles=${H} L_cycles=${L}  full_backprop=True  data=${DATA_DIR}  ckpt=${CKPT_DIR}"
 
 # ---- Launch: single GPU, size B, from scratch -----------------------
+# compile_scope=block compiles each TransformerBlock once instead of tracing the whole
+# H*(L+1)-deep unroll into a single graph (up to 252 blocks at (6,6)), which is what made
+# compilation take ~45 min and dominate host memory.
+#
 # full_backprop=True also zeroes bp_warmup_ratio (enforced in the config validator), so
 # the gradient budget is constant from step 1. Verify in W&B: the instrumentation probe
 # logs bp/H_bp_steps and bp/L_bp_steps, which must read H and H*L respectively.
@@ -84,5 +101,6 @@ srun python -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 
   arch.L_cycles=${L} \
   arch.full_backprop=True \
   arch.grad_checkpointing=True \
+  compile_scope=block \
   run_name=${RUN} \
   checkpoint_path=${CKPT_DIR}

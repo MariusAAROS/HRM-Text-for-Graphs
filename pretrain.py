@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from dataclasses import dataclass
 from pathlib import Path
 from glob import glob
@@ -79,6 +79,11 @@ class PretrainConfig(pydantic.BaseModel):
     seed: int = 0
     checkpoint_interval: int = 1
     log_interval: int = 5
+
+    # "step" traces the whole unrolled recurrence into one graph; with full_backprop and a deep
+    # (H, L) that is H*(L+1)*n_layers blocks, and compiling it costs tens of GB of host RAM.
+    # "block" compiles each TransformerBlock once and reuses it across every cycle.
+    compile_scope: Literal["step", "block"] = "step"
 
     instrumentation: InstrumentationConfig = InstrumentationConfig()
 
@@ -167,6 +172,11 @@ def create_model_and_carry(config: PretrainConfig, train_metadata: V1DatasetMeta
 
     apply_fsdp(model, fwd_bwd_dtype)
 
+    if config.compile_scope == "block":
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.compile(dynamic=False)
+
     # ----Create optimizer----
     optim = AdamATan2(model.parameters(),
                       lr=torch.tensor(0.0, dtype=torch.get_default_dtype(), device="cpu"),
@@ -216,13 +226,15 @@ def update_lr(config: PretrainConfig, train_state: TrainState) -> float:
     return lr
 
 
-@torch.compile(dynamic=False)
-def train_batch(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
+def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
     train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
     loss.backward()
     train_state.optim.step()
     train_state.optim.zero_grad()
     return metrics
+
+
+train_batch = torch.compile(train_batch_eager, dynamic=False)
 
 
 def train_batch_probed(train_state: TrainState, batch: dict[str, Tensor], probe: RecursionProbe, **kwargs):
@@ -375,6 +387,9 @@ def launch(hydra_config: DictConfig):
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
         save_code_and_config(config, train_metadata)
 
+    # With compile_scope="block" the compiled units live inside the model, so the step itself stays eager.
+    train_step = train_batch if config.compile_scope == "step" else train_batch_eager
+
     # Training Loop
     for epoch in range(1, config.epochs + 1):
         print (f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {epoch}")
@@ -395,7 +410,7 @@ def launch(hydra_config: DictConfig):
                 probe = RecursionProbe(config.instrumentation)
                 metrics = train_batch_probed(train_state, full_batch, probe, **train_extra_args)
             else:
-                metrics = train_batch(train_state, full_batch, **train_extra_args)
+                metrics = train_step(train_state, full_batch, **train_extra_args)
 
             if train_state.step % config.log_interval == 0:
                 metrics = reduce_metrics(metrics, prefix="train/")
