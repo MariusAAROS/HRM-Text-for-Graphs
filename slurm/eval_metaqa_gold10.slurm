@@ -20,8 +20,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --time=10:00:00
-#SBATCH --qos=qos_gpu_a100-t3        # 128-token answers = 4x the forwards; the 2h dev QoS is too tight
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev        # 128-token answers = 4x the forwards; the 2h dev QoS is too tight
 #SBATCH --array=0-5
 
 set -euo pipefail
