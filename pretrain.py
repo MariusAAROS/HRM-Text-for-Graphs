@@ -240,9 +240,11 @@ train_batch = torch.compile(train_batch_eager, dynamic=False)
 def train_batch_probed(train_state: TrainState, batch: dict[str, Tensor], probe: RecursionProbe, **kwargs):
     """Eager twin of train_batch. Numerics differ slightly from the compiled path, so a probed
     run is not bit-comparable against an unprobed one."""
+    # The slot is released before backward: with grad checkpointing the layer forwards re-run
+    # during backward, which would double-record. The zgrad hooks hold the probe object directly.
     with active_probe(probe):
         train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
-        loss.backward()
+    loss.backward()
     probe.finalize_grads(train_state.model)
     train_state.optim.step()
     train_state.optim.zero_grad()
@@ -407,7 +409,8 @@ def launch(hydra_config: DictConfig):
             # Step-based and therefore rank-invariant, which keeps the reduce below collective-safe.
             probe = None
             if config.instrumentation.enabled and train_state.step % config.instrumentation.interval == 0:
-                probe = RecursionProbe(config.instrumentation)
+                probe = RecursionProbe(config.instrumentation,
+                                       with_attention=train_state.step % config.instrumentation.attn_interval == 0)
                 metrics = train_batch_probed(train_state, full_batch, probe, **train_extra_args)
             else:
                 metrics = train_step(train_state, full_batch, **train_extra_args)

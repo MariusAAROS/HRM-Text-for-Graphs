@@ -63,16 +63,22 @@ class TinyRecursiveModel(nn.Module):
 
         for i in range(self.H_cycles):
             for k in range(i * self.L_cycles, (i + 1) * self.L_cycles):
+                if probe is not None:
+                    probe.begin_step("L", k, self.H_cycles * self.L_cycles)
                 with torch.set_grad_enabled(torch.is_grad_enabled() and (k >= self.H_cycles * self.L_cycles - self.L_bp_steps)):
                     z_L_next = self.L_level(z_L, z_H, **seq_info, cache=cache["L"][k] if cache is not None else None)
                 if probe is not None:
-                    probe.record("L", k, z_L, z_L_next)
+                    probe.record("L", k, z_L, z_L_next, x)
+                    probe.end_step()
                 z_L = z_L_next
             
+            if probe is not None:
+                probe.begin_step("H", i, self.H_cycles)
             with torch.set_grad_enabled(torch.is_grad_enabled() and (i >= self.H_cycles - self.H_bp_steps)):
                 z_H_next = self.L_level(z_H, z_L, **seq_info, cache=cache["H"][i] if cache is not None else None)
             if probe is not None:
-                probe.record("H", i, z_H, z_H_next)
+                probe.record("H", i, z_H, z_H_next, x)
+                probe.end_step()
             z_H = z_H_next
 
         return None, z_H

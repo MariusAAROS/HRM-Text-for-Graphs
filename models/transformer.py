@@ -67,7 +67,7 @@ class TransformerConfig(BaseModel):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, config: TransformerConfig) -> None:
+    def __init__(self, config: TransformerConfig, layer_idx: int = 0) -> None:
         super().__init__()
         self.attn = Attention(
             hidden_size=config.hidden_size,
@@ -75,6 +75,9 @@ class TransformerBlock(nn.Module):
             num_heads=config.num_heads,
             num_key_value_heads=config.num_heads,
             attn_type=config.attn_type,
+
+            layer_idx=layer_idx,
+            n_layers=config.n_layers,
 
             init_std_in=config.init_config.in_std,
             init_std_out=config.init_config.attn_out_std
@@ -112,7 +115,7 @@ class Transformer(nn.Module):
             self.rotary_emb = RotaryEmbedding(config.hidden_size // config.num_heads, config.max_seq_len, base=config.rope_theta)
 
         # Layers
-        self.layers = nn.ModuleList([TransformerBlock(config) for _layer_idx in range(config.n_layers)])
+        self.layers = nn.ModuleList([TransformerBlock(config, layer_idx=_layer_idx) for _layer_idx in range(config.n_layers)])
         self.grad_checkpointing = config.grad_checkpointing
 
         # Use final norm only for prenorm

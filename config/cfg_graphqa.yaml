@@ -75,3 +75,10 @@ instrumentation:
   log_eff_rank: true
   log_zgrad: true
   log_param_grads: true
+  log_fusion: true
+  log_x_survival: true
+  log_attn: true
+  attn_interval: 500
+  attn_query_sample: 256
+  attn_layers: ends
+  log_attn_drift: true
