@@ -58,10 +58,10 @@ set -euo pipefail
 # (6,12) = 78, below the already-completed v1 (8,12) = 104, so 20h still holds.
 # [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
 # [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
-# [v2] H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
-# [v2] L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
-H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
-L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
+H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
+L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
+# H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
+# L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=graphqa_H${H}_L${L}
