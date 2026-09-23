@@ -28,8 +28,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU
 #SBATCH --hint=nomultithread
-#SBATCH --time=20:00:00
-#SBATCH --qos=qos_gpu_a100-t3       # production QoS; the deepest config (6,12) needs >2h
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev       # production QoS; the deepest config (6,12) needs >2h
 #SBATCH --array=0-15%8             # 16 (H,L) configs (see grid below); %10 = Jean Zay parallel cap
 
 set -euo pipefail
