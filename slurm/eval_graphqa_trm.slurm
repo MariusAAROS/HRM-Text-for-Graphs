@@ -23,7 +23,7 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
 #SBATCH --qos=qos_gpu_a100-dev
-#SBATCH --array=0-15%10
+#SBATCH --array=0-15%8
 
 set -euo pipefail
 
