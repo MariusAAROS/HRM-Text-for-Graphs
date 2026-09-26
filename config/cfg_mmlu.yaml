@@ -48,5 +48,20 @@ beta2: 0.95
 
 ema: 0.999
 
+instrumentation:
+  enabled: true
+  interval: 100
+  token_sample: 8192
+  log_eff_rank: true
+  log_zgrad: true
+  log_param_grads: true
+  log_fusion: true
+  log_x_survival: true
+  log_attn: true
+  attn_interval: 500
+  attn_query_sample: 256
+  attn_layers: ends
+  log_attn_drift: true
+
 # Fixed across every config so runs differ ONLY in (H_cycles, L_cycles).
 seed: 0

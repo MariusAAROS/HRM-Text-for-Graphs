@@ -19,13 +19,17 @@
 #SBATCH --hint=nomultithread
 #SBATCH --time=02:00:00
 #SBATCH --qos=qos_gpu_a100-dev
-#SBATCH --array=0-8
+#SBATCH --array=0-15%8
 
 set -euo pipefail
 
-# Same grid as training.
-H_LIST=(2 4 6 8 1 2 3 4 6)
-L_LIST=(3 6 9 12 12 6 4 3 2)
+# Same grid as training -- see train_graphqa.slurm for the v2 index table.
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
+L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
+# H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
+# L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=graphqa_H${H}_L${L}

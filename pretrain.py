@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from dataclasses import dataclass
 from pathlib import Path
 from glob import glob
@@ -27,6 +27,8 @@ from models.common import wrap_tensor
 from models.transformer import TransformerBlock
 from models.adam_atan2 import AdamATan2
 from utils.functions import load_model_class, get_model_source_path
+from utils.instrumentation import (InstrumentationConfig, RecursionProbe, active_probe,
+                                  derive_summaries, reduce_probe_metrics)
 from dataset_new import V1Dataset, V1DatasetConfig, V1DatasetMeta
 
 
@@ -77,6 +79,22 @@ class PretrainConfig(pydantic.BaseModel):
     seed: int = 0
     checkpoint_interval: int = 1
     log_interval: int = 5
+
+    # "step" traces the whole unrolled recurrence into one graph; with full_backprop and a deep
+    # (H, L) that is H*(L+1)*n_layers blocks, and compiling it costs tens of GB of host RAM.
+    # "block" compiles each TransformerBlock once and reuses it across every cycle.
+    compile_scope: Literal["step", "block"] = "step"
+
+    instrumentation: InstrumentationConfig = InstrumentationConfig()
+
+    @pydantic.model_validator(mode="after")
+    def _validate_instrumentation(self):
+        # Probe steps must coincide with log steps: reduce_probe_metrics is a collective and its
+        # result is merged into the single wandb.log() call of that step.
+        if self.instrumentation.enabled and self.instrumentation.interval % self.log_interval != 0:
+            raise ValueError(f"instrumentation.interval ({self.instrumentation.interval}) must be "
+                             f"a multiple of log_interval ({self.log_interval}).")
+        return self
 
 
 @dataclass
@@ -154,6 +172,11 @@ def create_model_and_carry(config: PretrainConfig, train_metadata: V1DatasetMeta
 
     apply_fsdp(model, fwd_bwd_dtype)
 
+    if config.compile_scope == "block":
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.compile(dynamic=False)
+
     # ----Create optimizer----
     optim = AdamATan2(model.parameters(),
                       lr=torch.tensor(0.0, dtype=torch.get_default_dtype(), device="cpu"),
@@ -203,10 +226,26 @@ def update_lr(config: PretrainConfig, train_state: TrainState) -> float:
     return lr
 
 
-@torch.compile(dynamic=False)
-def train_batch(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
+def train_batch_eager(train_state: TrainState, batch: dict[str, Tensor], **kwargs):
     train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
     loss.backward()
+    train_state.optim.step()
+    train_state.optim.zero_grad()
+    return metrics
+
+
+train_batch = torch.compile(train_batch_eager, dynamic=False)
+
+
+def train_batch_probed(train_state: TrainState, batch: dict[str, Tensor], probe: RecursionProbe, **kwargs):
+    """Eager twin of train_batch. Numerics differ slightly from the compiled path, so a probed
+    run is not bit-comparable against an unprobed one."""
+    # The slot is released before backward: with grad checkpointing the layer forwards re-run
+    # during backward, which would double-record. The zgrad hooks hold the probe object directly.
+    with active_probe(probe):
+        train_state.carry, loss, metrics = train_state.model(batch=batch, carry=train_state.carry, **kwargs)
+    loss.backward()
+    probe.finalize_grads(train_state.model)
     train_state.optim.step()
     train_state.optim.zero_grad()
     return metrics
@@ -275,7 +314,8 @@ def save_code_and_config(config: PretrainConfig, train_metadata: V1DatasetMeta):
 
     # Copy code
     code_list = [
-        get_model_source_path(config.arch.name)
+        get_model_source_path(config.arch.name),
+        os.path.join(os.path.dirname(__file__), "utils", "instrumentation.py"),
     ]
     for code_file in code_list:
         if code_file is not None:
@@ -349,6 +389,9 @@ def launch(hydra_config: DictConfig):
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
         save_code_and_config(config, train_metadata)
 
+    # With compile_scope="block" the compiled units live inside the model, so the step itself stays eager.
+    train_step = train_batch if config.compile_scope == "step" else train_batch_eager
+
     # Training Loop
     for epoch in range(1, config.epochs + 1):
         print (f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {epoch}")
@@ -361,15 +404,25 @@ def launch(hydra_config: DictConfig):
             # Extra train arguments (such as BP warmup etc.)
             train_extra_args = train_state.model.compute_train_extra_args(train_state)  # pyright: ignore[reportCallIssue]
             
-            metrics = train_batch(train_state, batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()}, **train_extra_args)
+            full_batch = batch | {k: wrap_tensor(torch.tensor(v, device="cpu")) for k, v in batch_info.items()}
+
+            # Step-based and therefore rank-invariant, which keeps the reduce below collective-safe.
+            probe = None
+            if config.instrumentation.enabled and train_state.step % config.instrumentation.interval == 0:
+                probe = RecursionProbe(config.instrumentation,
+                                       with_attention=train_state.step % config.instrumentation.attn_interval == 0)
+                metrics = train_batch_probed(train_state, full_batch, probe, **train_extra_args)
+            else:
+                metrics = train_step(train_state, full_batch, **train_extra_args)
 
             if train_state.step % config.log_interval == 0:
                 metrics = reduce_metrics(metrics, prefix="train/")
+                probe_metrics = reduce_probe_metrics(probe) if probe is not None else {}
                 if RANK == 0:
                     progress_bar.update(train_state.step - progress_bar.n)  # type: ignore
-                    wandb.log(metrics | train_extra_args | {"train/lr": lr}, step=train_state.step)
+                    wandb.log(metrics | probe_metrics | derive_summaries(probe_metrics) | train_extra_args | {"train/lr": lr}, step=train_state.step)
 
-            del metrics
+            del metrics, probe
 
         ############ EVAL STACK: TBD TODO
 

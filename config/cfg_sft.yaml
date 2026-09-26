@@ -33,3 +33,7 @@ beta2: 0.95
 # tracking mostly SFT trajectory, and using --use-ema at eval gives a small
 # regularization boost over raw weights.
 ema: 0.999
+
+instrumentation:
+  enabled: false  # Off by default for fine-tuning; enable for recursion ablations.
+  interval: 100

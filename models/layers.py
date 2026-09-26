@@ -8,6 +8,7 @@ from einops import rearrange
 
 from models.common import trunc_normal_init_, unwrap_tensor
 from models.flash_attention_prefixlm_v2 import flash_attn_varlen_prefixlm
+from utils.instrumentation import get_active_probe
 
 
 Carry = dict[str, Any]
@@ -140,12 +141,14 @@ def _sdpa_with_kvcache(q: Tensor, k: Tensor, v: Tensor, cache: "Cache", cache_le
 
 
 class Attention(nn.Module):
-    def __init__(self, hidden_size, head_dim, num_heads, num_key_value_heads, attn_type, init_std_in=None, init_std_out=None, **kwargs):
+    def __init__(self, hidden_size, head_dim, num_heads, num_key_value_heads, attn_type, init_std_in=None, init_std_out=None, layer_idx=0, n_layers=1, **kwargs):
         super().__init__()
         self.head_dim = head_dim
         self.num_heads = num_heads
         self.num_key_value_heads = num_key_value_heads
         self.attn_type = attn_type
+        self.layer_idx = layer_idx
+        self.n_layers = n_layers
 
         self.gqkv_proj = LinearInit(hidden_size, self.head_dim, batch_out_features=(2 * self.num_heads + 2 * self.num_key_value_heads, ),
                                    bias=False, init_std=init_std_in, **kwargs)
@@ -168,7 +171,11 @@ class Attention(nn.Module):
         is_causal = self.attn_type == "causal"
         if cache is None:
             # flash attn (training)
-            attn_output = flash_attn_varlen_prefixlm(query, key, value, is_causal, **{name: unwrap_tensor(tensor) for name, tensor in seq_info.items()})
+            seq_info = {name: unwrap_tensor(tensor) for name, tensor in seq_info.items()}
+            probe = get_active_probe()
+            if probe is not None:
+                probe.record_attention(self.layer_idx, self.n_layers, query, key, value, gate, is_causal, seq_info)
+            attn_output = flash_attn_varlen_prefixlm(query, key, value, is_causal, **seq_info)
         else:
             # A100 fallback (no FA3): write new k,v into the static cache, then attend
             # over the valid range with SDPA. The graphqa eval uses a cache-free

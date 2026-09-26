@@ -9,6 +9,7 @@ from safetensors.torch import save_file
 from transformers import AutoTokenizer
 
 from dataset_new import V1DatasetMeta
+from models.common import resolve_bp_steps
 from pretrain import PretrainConfig
 from simple_inference_engine import inference_load_checkpoint
 
@@ -46,9 +47,15 @@ def _compute_intermediate_size(hidden_size: int, expansion: float) -> int:
 
 def _compute_l_bp_steps(cfg: dict) -> list[int]:
     H, L = int(cfg["H_cycles"]), int(cfg["L_cycles"])
-    bp_steps = int(cfg.get("bp_max_steps", cfg.get("max_bp_steps", H + 1)))
-    h_bp_steps = min(H, max(0, bp_steps - 1))
-    l_bp_steps = min(H * L, max(0, bp_steps - h_bp_steps))
+
+    h_bp_steps, l_bp_steps = cfg.get("H_bp_steps"), cfg.get("L_bp_steps")
+    if h_bp_steps is None or l_bp_steps is None:
+        # Older HRM checkpoints only recorded the scalar bp warmup ceiling.
+        bp_steps = int(cfg.get("bp_max_steps", cfg.get("max_bp_steps", H + 1)))
+        h_bp_steps = min(H, max(0, bp_steps - 1)) if h_bp_steps is None else h_bp_steps
+        l_bp_steps = max(0, bp_steps - h_bp_steps) if l_bp_steps is None else l_bp_steps
+
+    _, l_bp_steps = resolve_bp_steps(H, L, int(h_bp_steps), int(l_bp_steps), bool(cfg.get("full_backprop", False)))
     threshold = H * L - l_bp_steps
     return [max(0, min(L, (i + 1) * L - threshold)) for i in range(H)]
 

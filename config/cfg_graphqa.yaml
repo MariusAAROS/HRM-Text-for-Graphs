@@ -27,13 +27,17 @@ project_name: HRM-GraphQA-Ablation
 run_name: null
 checkpoint_path: null
 
+# "step" traces the whole unrolled recurrence into one graph; the full-backprop arm
+# overrides this to "block" on the CLI (see slurm/train_graphqa_fullbp.slurm).
+compile_scope: step
+
 # GraphQA is a small, narrow task -> more epochs, modest token batch.
 # NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
 # global_batch_size = packed tokens per step = FlexAttention sequence length S.
 # Keep it a multiple of 128 (Flex tiling). FlexAttention here is dense O(S^2),
 # so keep S small on A100 (4096 packs ~20 short graphqa samples per step).
 global_batch_size: 4096
-epochs: 30
+epochs: 20
 checkpoint_interval: 5
 
 # From-scratch LR schedule (higher than SFT's 3e-5, with a short warmup).
@@ -53,7 +57,28 @@ seed: 0
 
 # Backprop-through-time policy (from config/arch/net/hrm.yaml):
 #   bp_warmup_ratio=0.2, bp_min_steps=2, bp_max_steps=5.
-# Kept FIXED across all configs. This is HRM's native truncated 1-step-gradient
-# regime (bounded memory), which is required for the deep configs like (8,12).
-# Do NOT raise bp_max_steps to "full backprop" -- (8,12) unrolls 8*12=96 L-steps
-# and would blow up memory. Fixed truncation keeps the ablation fair and feasible.
+# Kept FIXED across all configs of the main ablation grid. This is HRM's native truncated
+# 1-step-gradient regime (bounded memory), which is required for the deep configs like (8,12):
+# (8,12) unrolls 8*12=96 L-steps and full backprop through it would blow up memory.
+#
+# The truncated budget is itself a confound: it shrinks as H_cycles grows, so "deeper hurts"
+# and "less gradient signal hurts" are not separable within this grid. The de-confounding arm
+# is run separately via `arch.full_backprop=True arch.grad_checkpointing=True`
+# (see slurm/train_graphqa_fullbp.slurm), on a shallower subset that fits in memory.
+
+# Recursion-depth probe. Probe steps run an eager (uncompiled) fwd/bwd, so `interval`
+# must be a multiple of log_interval (5) and coarse enough to stay ~1% of wall clock.
+instrumentation:
+  enabled: true
+  interval: 100
+  token_sample: 8192
+  log_eff_rank: true
+  log_zgrad: true
+  log_param_grads: true
+  log_fusion: true
+  log_x_survival: true
+  log_attn: true
+  attn_interval: 500
+  attn_query_sample: 256
+  attn_layers: ends
+  log_attn_drift: true

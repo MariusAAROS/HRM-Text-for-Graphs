@@ -10,3 +10,8 @@ L_cycles: 3
 
 H_bp_steps: 2
 L_bp_steps: 3
+
+# -1 = all cycles on that axis. `full_backprop: True` overrides both.
+full_backprop: False
+
+grad_checkpointing: False

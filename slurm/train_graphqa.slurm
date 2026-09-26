@@ -22,17 +22,46 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8           # A100 node: ~8 CPU cores per GPU
 #SBATCH --hint=nomultithread
-#SBATCH --time=20:00:00
-#SBATCH --qos=qos_gpu_a100-t3       # production QoS; deep configs (8,12)/(6,9) need >2h
-#SBATCH --array=0-8                 # 9 (H,L) configs (see grid below)
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev       # production QoS; the deepest config (6,12) needs >2h
+#SBATCH --array=0-15%8             # 16 (H,L) configs (see grid below); %10 = Jean Zay parallel cap
 
 set -euo pipefail
 
 # ---- (H,L) grid: array index -> config ------------------------------
-# Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
-# Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
-H_LIST=(2 4 6 8 1 2 3 4 6)
-L_LIST=(3 6 9 12 12 6 4 3 2)
+# [v1] Axis 1  (fix ratio L/H = 1.5) :  (2,3) (4,6) (6,9) (8,12)
+# [v1] Axis 2  (fix H*L ~= 12)       :  (1,12) (2,6) (3,4) (4,3) (6,2)
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+#
+# v2 replaces the two v1 axes with a 2-D (H,L) surface: each v1 axis had a single
+# degree of freedom (at fixed H*L=D the ratio is forced to D/H^2), so a ratio effect
+# was not separable from an H effect. Core is a balanced 5x3 rectangle,
+# H in {1,2,3,4,6} x L in {3,6,12}; the 5 cells v1 already trained -- (2,3) (4,3)
+# (2,6) (4,6) (1,12) -- are reused, not re-run, so this array holds the 10 missing
+# rectangle cells plus 6 probes: H=5 at L=6 (resolve the H=3 -> H=4 cliff), L=1 at
+# H=1,2,4 (non-recurrent control (1,1) + pure-H-recursion anchors), L=24 at H=1,2
+# (push past the v1 corner optimum (1,12)).
+#
+#  idx   H    L   H*L    L/H   H*(L+1)  |  idx   H    L   H*L    L/H   H*(L+1)
+#    0   1    3     3   3.00       4    |    8   3   12    36   4.00      39
+#    1   3    3     9   1.00      12    |    9   4   12    48   3.00      52
+#    2   6    3    18   0.50      24    |   10   6   12    72   2.00      78
+#    3   1    6     6   6.00       7    |   11   1    1     1   1.00       2
+#    4   3    6    18   2.00      21    |   12   2    1     2   0.50       4
+#    5   5    6    30   1.20      35    |   13   4    1     4   0.25       8
+#    6   6    6    36   1.00      42    |   14   1   24    24  24.00      25
+#    7   2   12    24   6.00      26    |   15   2   24    48  12.00      50
+#
+# H*(L+1) is the block-application count (L L-block applications plus one H-block
+# per cycle); H*L alone undercounts the high-level work by H. Deepest new config is
+# (6,12) = 78, below the already-completed v1 (8,12) = 104, so 20h still holds.
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2)
+L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24)
+# H_LIST=(1 3 6 1 3 5 6 2 3 4 6 1 2 4 1 2 2 4 6 8 1 2 3 4 6) # [v1 + v2]
+# L_LIST=(3 3 3 6 6 6 6 12 12 12 12 1 1 1 24 24 3 6 9 12 12 6 4 3 2) # [v1 + v2]
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=graphqa_H${H}_L${L}

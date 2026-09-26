@@ -17,15 +17,17 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --time=10:00:00
-#SBATCH --qos=qos_gpu_a100-t3       # 1134 long prompts at batch 4 does not fit the 2h dev QoS
-#SBATCH --array=0-8
+#SBATCH --time=2:00:00
+#SBATCH --qos=qos_gpu_a100-dev       # 1134 long prompts at batch 4 does not fit the 2h dev QoS
+#SBATCH --array=0-5
 
 set -euo pipefail
 
-# Same grid as training.
-H_LIST=(2 4 6 8 1 2 3 4 6)
-L_LIST=(3 6 9 12 12 6 4 3 2)
+# Same grid as training -- see train_kqapro.slurm for the v2 index table.
+# [v1] H_LIST=(2 4 6 8 1 2 3 4 6)
+# [v1] L_LIST=(3 6 9 12 12 6 4 3 2)
+H_LIST=(1 3 5 6 2 1)
+L_LIST=(6 6 6 6 12 1)
 H=${H_LIST[$SLURM_ARRAY_TASK_ID]}
 L=${L_LIST[$SLURM_ARRAY_TASK_ID]}
 RUN=kqapro_H${H}_L${L}
