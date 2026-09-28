@@ -135,6 +135,9 @@ eval_run() {  # $1 = run name
       done
     done
   done
+  # One wandb run per eval report (same keys as eval_graphqa.py --wandb_project); skips already-logged reports.
+  "$PY" scripts/log_graphqa_evals_to_wandb.py --root "$ROOT" --run "$1" > "$ROOT/logs/wandb_eval_$1.log" 2>&1 \
+    || echo "[eval] wandb logging FAILED: $1 (see $ROOT/logs/wandb_eval_$1.log)"
 }
 
 train_run() {  # $1 = run name, $2 = overrides
