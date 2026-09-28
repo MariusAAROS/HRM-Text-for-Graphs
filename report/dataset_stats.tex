@@ -9,26 +9,27 @@
 \cmidrule(lr){3-6}
  & \textbf{GraphQA} & Gold-1 & Gold-5 & Gold-10 & Retrieved-1 & \textbf{KQA-Pro} \\
 \midrule
-Knowledge source & Synthetic (7 generators) & \multicolumn{4}{c}{WikiMovies (43k entities, 9 relations, 135k triples)} & Wikidata (17k entities) \\
-Context in prompt & Whole graph & \multicolumn{3}{c}{Gold subgraph} & Retrieved & Gold / retrieved \\
-Question categories & 11 tasks & \multicolumn{4}{c}{1-, 2-, 3-hop} & 7 types \\
+Knowledge base & Synthetic & \multicolumn{4}{c}{WikiMovies} & Wikidata \\
+KB entities & -- & \multicolumn{4}{c}{43k} & 17k \\
+Context & Whole graph & \multicolumn{3}{c}{Gold subgraph} & Retrieved & Mixed \\
+Categories & 11 tasks & \multicolumn{4}{c}{1-, 2-, 3-hop} & 7 types \\
 \midrule
-Train questions & 3,080 & 3,999 & 3,929 & 2,940 & 3,968 & 6,824 \\
-Val questions & 385 & 399 & 399 & 302 & 394 & 760 \\
-Test questions & 385 & 600 & 559 & 389 & 598 & 1,134 \\
+Train & 3,080 & 3,999 & 3,929 & 2,940 & 3,968 & 6,824 \\
+Val & 385 & 399 & 399 & 302 & 394 & 760 \\
+Test & 385 & 600 & 559 & 389 & 598 & 1,134 \\
 \midrule
-Context nodes & $11.4\pm4.4$ & $93.6\pm11.5$ & $94.9\pm8.2$ & $93.6\pm6.3$ & $63.1\pm28.7$ & $24.4\pm16.1$ \\
-Context edges & $29.0\pm32.6$ & $76.8\pm11.6$ & $79.9\pm2.1$ & $80.0\pm0.0$ & $67.2\pm26.4$ & $57.3\pm12.4$ \\
+Context nodes & $11\pm4$ & $94\pm12$ & $95\pm8$ & $94\pm6$ & $63\pm29$ & $24\pm16$ \\
+Context edges & $29\pm33$ & $77\pm12$ & $80\pm2$ & $80\pm0$ & $67\pm26$ & $57\pm12$ \\
 Reasoning steps & -- & $2.0\pm0.8$ & $2.0\pm0.8$ & $2.4\pm0.6$ & $2.0\pm0.8$ & $4.9\pm1.9$ \\
-Answers per question & 1 & 1 & 5 & 10 & 1 & 1 \\
-Answers in context (\%) & -- & 100.0 & 100.0 & 100.0 & 85.0 & -- \\
+Answers & 1 & 1 & 5 & 10 & 1 & 1 \\
+Answer in context (\%) & -- & 100.0 & 100.0 & 100.0 & 85.0 & -- \\
 \midrule
 Input tokens & $282\pm235$ & $1013\pm180$ & $1046\pm97$ & $1061\pm93$ & $888\pm330$ & $1298\pm436$ \\
 Input tokens (max) & 1,321 & 1,375 & 1,391 & 1,345 & 1,409 & 3,002 \\
-Output tokens & $5.5\pm8.3$ & $4.1\pm1.5$ & $20.9\pm6.6$ & $42.8\pm12.9$ & $4.1\pm1.5$ & $4.4\pm3.3$ \\
+Output tokens & $6\pm8$ & $4\pm2$ & $21\pm7$ & $43\pm13$ & $4\pm2$ & $4\pm3$ \\
 \bottomrule
 \end{tabular}%
 }
-\caption{Dataset statistics. Rows other than split sizes are computed over all three splits and report mean$\pm$std. Context nodes and edges are the entities and facts serialized in the prompt (for GraphQA, the whole graph). Reasoning steps are hops for MetaQA and KoPL program length for KQA-Pro. Tokens are counted with the HRM-Text tokenizer. Most KQA-Pro questions appear twice, once with a gold 1-hop context and once with a retrieved 2-hop one (49\% gold; 3,580/399/599 distinct questions); 4.2\% of its contexts are empty. The Meta-ICL version of each dataset adds 32 demonstrations per question. GraphQA also has a leave-one-task-out split (3,500/175/175 questions).}
+\caption{Dataset statistics. Train/val/test give the number of questions; the remaining rows are computed over all three splits and report mean$\pm$std. GraphQA graphs come from 7 random-graph generators; the WikiMovies KB has 9 relations and 135k triples. Context nodes and edges are the entities and facts serialized in the prompt (for GraphQA, the whole graph). Reasoning steps are hops for MetaQA and KoPL program length for KQA-Pro. Tokens are counted with the HRM-Text tokenizer. Most KQA-Pro questions appear twice, once with a gold 1-hop context and once with a retrieved 2-hop one (49\% gold; 3,580/399/599 distinct questions); 4.2\% of its contexts are empty. The Meta-ICL version of each dataset adds 32 demonstrations per question. GraphQA also has a leave-one-task-out split (3,500/175/175 questions).}
 \label{tab:dataset_stats}
 \end{table*}

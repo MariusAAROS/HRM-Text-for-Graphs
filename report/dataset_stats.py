@@ -142,37 +142,35 @@ def build_wide(S, kb_meta, kb_kqa, ood):
         row("", [r"\textbf{GraphQA}", "Gold-1", "Gold-5", "Gold-10", "Retrieved-1",
                  r"\textbf{KQA-Pro}"]),
         r"\midrule",
-        row("Knowledge source", [
-            f"Synthetic ({len(g['generators'])} generators)",
-            rf"\multicolumn{{4}}{{c}}{{WikiMovies ({k(kb_meta['entities'])} entities, "
-            rf"{kb_meta['relations']} relations, {k(kb_meta['triples'])} triples)}}",
-            rf"Wikidata ({k(kb_kqa['entities'])} entities)",
-        ]),
-        row("Context in prompt", ["Whole graph", r"\multicolumn{3}{c}{Gold subgraph}",
-                                  "Retrieved", "Gold / retrieved"]),
-        row("Question categories", [f"{len(g['tasks'])} tasks",
-                                    r"\multicolumn{4}{c}{1-, 2-, 3-hop}",
-                                    f"{len(kq['tasks'])} types"]),
+        row("Knowledge base", ["Synthetic", r"\multicolumn{4}{c}{WikiMovies}", "Wikidata"]),
+        row("KB entities", ["--", rf"\multicolumn{{4}}{{c}}{{{k(kb_meta['entities'])}}}",
+                            k(kb_kqa["entities"])]),
+        row("Context", ["Whole graph", r"\multicolumn{3}{c}{Gold subgraph}", "Retrieved",
+                        "Mixed"]),
+        row("Categories", [f"{len(g['tasks'])} tasks", r"\multicolumn{4}{c}{1-, 2-, 3-hop}",
+                           f"{len(kq['tasks'])} types"]),
         r"\midrule",
-        *[row(f"{sp.capitalize()} questions", per(lambda s, sp=sp: f"{s['n'][sp]:,}"))
+        *[row(f"{sp.capitalize()}", per(lambda s, sp=sp: f"{s['n'][sp]:,}"))
           for sp in SPLITS],
         r"\midrule",
-        row("Context nodes", per(lambda s: pm(s["nodes"]))),
-        row("Context edges", per(lambda s: pm(s["edges"]))),
+        row("Context nodes", per(lambda s: pm(s["nodes"], 0))),
+        row("Context edges", per(lambda s: pm(s["edges"], 0))),
         row("Reasoning steps", per(na(lambda s: pm(s["steps"]), "steps"))),
-        row("Answers per question", per(lambda s: f"{s['answers'].mean():.0f}")),
-        row(r"Answers in context (\%)",
+        row("Answers", per(lambda s: f"{s['answers'].mean():.0f}")),
+        row(r"Answer in context (\%)",
             per(na(lambda s: f"{100 * s['recall']:.1f}", "recall"))),
         r"\midrule",
-        row("Input tokens", per(lambda s: f"${s['in_tok'].mean():.0f}\\pm"
-                                          f"{s['in_tok'].std():.0f}$")),
+        row("Input tokens", per(lambda s: pm(s["in_tok"], 0))),
         row("Input tokens (max)", per(lambda s: f"{s['in_tok'].max():,}")),
-        row("Output tokens", per(lambda s: pm(s["out_tok"]))),
+        row("Output tokens", per(lambda s: pm(s["out_tok"], 0))),
         r"\bottomrule",
         r"\end{tabular}%",
         r"}",
-        r"\caption{Dataset statistics. Rows other than split sizes are computed over all "
-        r"three splits and report mean$\pm$std. Context nodes and edges are the entities and "
+        r"\caption{Dataset statistics. Train/val/test give the number of questions; the "
+        r"remaining rows are computed over all three splits and report mean$\pm$std. "
+        rf"GraphQA graphs come from {len(g['generators'])} random-graph generators; the "
+        rf"WikiMovies KB has {kb_meta['relations']} relations and {k(kb_meta['triples'])} "
+        rf"triples. Context nodes and edges are the entities and "
         r"facts serialized in the prompt (for GraphQA, the whole graph). Reasoning steps are "
         r"hops for MetaQA and KoPL program length for KQA-Pro. Tokens are counted with the "
         r"HRM-Text tokenizer. "
@@ -194,32 +192,33 @@ def build_column(S):
     L = [
         r"\begin{table}[t]",
         r"\centering",
-        r"\small",
-        r"\setlength{\tabcolsep}{3.5pt}",
-        r"\begin{tabular}{@{}l rrr rr rr@{}}",
+        r"\footnotesize",
+        r"\setlength{\tabcolsep}{2.5pt}",
+        r"\begin{tabular}{@{}l rrr rr r@{}}",
         r"\toprule",
         r" & \multicolumn{3}{c}{\textbf{Questions}} & \multicolumn{2}{c}{\textbf{Context}}"
-        r" & & \\",
+        r" & \\",
         r"\cmidrule(lr){2-4}\cmidrule(lr){5-6}",
-        row("Dataset", ["Train", "Val", "Test", "Nodes", "Edges", "Ans.", "Tokens"]),
+        row("Dataset", ["Train", "Val", "Test", "Nodes", "Edges", "Tokens"]),
         r"\midrule",
     ]
     for label, _ in DATASETS:
         s = S[label]
         if label == METAQA[0]:
-            L.append(r"MetaQA & & & & & & & \\")
-        name = rf"\quad {label}" if label in METAQA else label
+            L.append(r"MetaQA & & & & & & \\")
+        name = rf"\hspace{{0.6em}}{label}" if label in METAQA else label
         L.append(row(name, [
             f"{s['n']['train']:,}", f"{s['n']['val']:,}", f"{s['n']['test']:,}",
             f"{s['nodes'].mean():.0f}", f"{s['edges'].mean():.0f}",
-            f"{s['answers'].mean():.0f}", f"{s['in_tok'].mean():,.0f}",
+            f"{s['in_tok'].mean():,.0f}",
         ]))
     L += [
         r"\bottomrule",
         r"\end{tabular}",
         r"\caption{Dataset statistics: number of questions per split, mean number of "
-        r"context nodes and edges serialized in the prompt, answers per question, and mean "
-        r"prompt length in HRM-Text tokens.}",
+        r"context nodes and edges serialized in the prompt, and mean prompt length in "
+        r"HRM-Text tokens. Gold-$k$ questions have exactly $k$ answers; all other questions "
+        r"have one.}",
         r"\label{tab:dataset_stats_column}",
         r"\end{table}",
     ]
