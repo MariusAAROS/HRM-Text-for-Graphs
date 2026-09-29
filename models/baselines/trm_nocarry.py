@@ -24,6 +24,9 @@ class TinyRecursiveModelConfig(TransformerConfig):
     # always pins H/L_bp_steps, so a user-set value is indistinguishable from the default.
     full_backprop: bool = False
 
+    # Re-inject the token embedding into every L step (z_L <- net(z_L, z_H + x)), as in the TRM paper.
+    inject_x: bool = False
+
 
 class TinyRecursiveModel(nn.Module):
     def __init__(self, config_dict: dict) -> None:
@@ -39,6 +42,7 @@ class TinyRecursiveModel(nn.Module):
         # Config
         self.H_cycles = config.H_cycles
         self.L_cycles = config.L_cycles
+        self.inject_x = config.inject_x
         self.H_bp_steps, self.L_bp_steps = resolve_bp_steps(
             config.H_cycles, config.L_cycles, config.H_bp_steps, config.L_bp_steps, config.full_backprop)
 
@@ -66,7 +70,7 @@ class TinyRecursiveModel(nn.Module):
                 if probe is not None:
                     probe.begin_step("L", k, self.H_cycles * self.L_cycles)
                 with torch.set_grad_enabled(torch.is_grad_enabled() and (k >= self.H_cycles * self.L_cycles - self.L_bp_steps)):
-                    z_L_next = self.L_level(z_L, z_H, **seq_info, cache=cache["L"][k] if cache is not None else None)
+                    z_L_next = self.L_level(z_L, z_H + x if self.inject_x else z_H, **seq_info, cache=cache["L"][k] if cache is not None else None)
                 if probe is not None:
                     probe.record("L", k, z_L, z_L_next, x)
                     probe.end_step()

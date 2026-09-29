@@ -7,7 +7,7 @@ from torch import Tensor
 
 from models.common import trunc_normal_init_, resolve_bp_steps
 from models.transformer import Transformer, Cache, TransformerConfig
-from utils.instrumentation import get_active_probe
+from utils.instrumentation import get_active_probe, suspend_probe
 
 
 class HierarchicalReasoningModelConfig(TransformerConfig):
@@ -26,6 +26,10 @@ class HierarchicalReasoningModelConfig(TransformerConfig):
     # NOTE: L_bp_steps counts the last N L-applications across ALL H cycles, so its max is H*L.
     H_bp_steps: Optional[int] = None
     L_bp_steps: Optional[int] = None
+
+    # Re-inject the token embedding into every L step (z_L <- L(z_L, z_H + x)), as in the original
+    # HRM / TRM. Off by default: here z_H starts at x but x is not re-injected afterwards.
+    inject_x: bool = False
 
     # Change some Transformer config of H-level
     # TODO: Try asymmetric H and L module, such as different size, hidden dims, architecture, attention type, etc.
@@ -65,7 +69,21 @@ class HierarchicalReasoningModelRecurrentBlock(nn.Module):
         probe = get_active_probe()
         if probe is not None:
             probe.record_fusion(hidden_states, input_injection, fused)
-        return self.core(fused, **kwargs)
+        out = self.core(fused, **kwargs)
+        if probe is not None and probe.config.log_gain and hidden_states.dim() > 1 and kwargs.get("cache") is None:
+            self._record_gain(probe, hidden_states, input_injection, out, kwargs)
+        return out
+
+    @torch.no_grad()
+    def _record_gain(self, probe, hidden_states: Tensor, input_injection: Tensor, out: Tensor, kwargs: dict) -> None:
+        # Finite-difference sensitivity of the block output to its incoming state. ~0 means the
+        # state is washed out and the recursion cannot carry information across steps.
+        h = hidden_states.detach()
+        delta = torch.randn_like(h) * (probe.config.gain_eps * h.float().pow(2).mean().sqrt()).to(h.dtype)
+        with suspend_probe():
+            out_perturbed = self.core(h + delta + input_injection.detach(), **kwargs)
+        rms = lambda t: t.float().pow(2).mean().sqrt()
+        probe.record_gain(rms(out_perturbed - out.detach()) / rms(delta).clamp_min(1e-12))
 
 
 class HierarchicalReasoningModel(nn.Module):
@@ -90,6 +108,7 @@ class HierarchicalReasoningModel(nn.Module):
         self.full_backprop = config.full_backprop
         self.cfg_H_bp_steps = config.H_bp_steps
         self.cfg_L_bp_steps = config.L_bp_steps
+        self.inject_x = config.inject_x
 
         self.hidden_size = config.hidden_size
         self.head_hint = self.H_level.core.head_hint  # Hint for LMHead init (inherit from H)
@@ -125,7 +144,7 @@ class HierarchicalReasoningModel(nn.Module):
                 if probe is not None:
                     probe.begin_step("L", k, self.H_cycles * self.L_cycles)
                 with torch.set_grad_enabled(torch.is_grad_enabled() and (k >= self.H_cycles * self.L_cycles - L_bp_steps)):
-                    z_L_next = self.L_level(z_L, z_H, **seq_info, cache=cache["L"][k] if cache is not None else None)
+                    z_L_next = self.L_level(z_L, z_H + x if self.inject_x else z_H, **seq_info, cache=cache["L"][k] if cache is not None else None)
                 if probe is not None:
                     probe.record("L", k, z_L, z_L_next, x)
                     probe.end_step()

@@ -44,8 +44,14 @@ def main():
         run = os.path.basename(os.path.dirname(path))
         with open(path) as f:
             report = json.load(f)
-        with open(os.path.join(RAW[set_name].format(root=args.root), f"{split}.json")) as f:
-            tasks = [r["task"] for r in json.load(f)]
+        # "<set>_Lov<k>" reports (L_cycles overridden at inference) share <set>'s questions. Sets without
+        # GraphQA task labels (e.g. pointer chasing) are logged without the per-task breakdown.
+        raw = RAW.get(set_name.split("_Lov")[0])
+        if raw is not None:
+            with open(os.path.join(raw.format(root=args.root), f"{split}.json")) as f:
+                tasks = [r["task"] for r in json.load(f)]
+        else:
+            tasks = ["all"] * len(report["samples"])
 
         per_task = defaultdict(lambda: [0, 0])
         for s in report["samples"]:

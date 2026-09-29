@@ -1,0 +1,15 @@
+# Pointer chasing (scripts/make_pointer_chasing.py): the controlled-depth positive control of the
+# recursion study (scripts/run_recursion_hyp_local.sh). Same model and optimizer recipe as GraphQA;
+# only the data and the epoch count differ.
+#
+# 12k samples x ~425 tokens = ~1,244 steps/epoch at 4096 tokens/step, so 4 epochs = ~5.0k steps,
+# close to the 4,358 steps of a GraphQA run.
+# NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
+defaults:
+  - cfg_graphqa
+  - _self_
+
+project_name: HRM-RecursionHyp-Local
+
+epochs: 4
+checkpoint_interval: 2

@@ -26,6 +26,7 @@
 # Two workers (one per GPU) claim runs from RUN_TABLE in order (longest first, stretch
 # runs last). A run whose final checkpoint exists is skipped. With DEADLINE set, a worker
 # does not start a run whose estimate (minutes, incl. eval) would end after it.
+# The queue machinery lives in scripts/lib_local_queue.sh (shared with run_recursion_hyp_local.sh).
 #
 # Usage (from repo root):
 #   BENCH=1 bash scripts/run_graphqa_fullbp_local.sh      # ~7 min per bench run, steps/s + peak memory
@@ -40,22 +41,8 @@ cd "$(dirname "$0")/.."
 ROOT="${ROOT:-/work/dfm/marius-ortega/graphqa_fullbp}"
 DATA_DIR="${DATA_DIR:-$ROOT/std_prepared}"
 EVAL_DIR="${EVAL_DIR:-data/graphqa/hrm-text/standard}"  # byte-identical to the "old" split of the grid figure
-PY="${PY:-$HOME/miniforge3/envs/hrm-text-graph-pt/bin/python}"
 CONFIG=cfg_graphqa
-EPOCHS="$(sed -n 's/^epochs: *\([0-9]*\).*/\1/p' config/${CONFIG}.yaml)"
 PROJECT="${PROJECT:-HRM-GraphQA-FullBP-Local}"
-EVAL_PROJECT="${EVAL_PROJECT:-${PROJECT}-eval}"
-SMOKE_PROJECT="${SMOKE_PROJECT:-${PROJECT}-smoke}"
-read -r -a GPUS <<< "${GPUS:-0 1}"
-BENCH="${BENCH:-0}"
-BENCH_SECONDS="${BENCH_SECONDS:-420}"
-DEADLINE="${DEADLINE:-}"
-POLL_SECONDS="${POLL_SECONDS:-300}"
-GPU_IDLE_MIB="${GPU_IDLE_MIB:-1024}"
-
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export WANDB_MODE="${WANDB_MODE:-online}"  # never "disabled": all_config.yaml (needed by eval) is only written with a wandb run
 
 # ---- Runs: name | estimated minutes (train + eval, on one RTX PRO 6000) | hydra overrides ----
 # Longest first to minimise the makespan; seed-1 stretch runs last (dropped first by DEADLINE).
@@ -86,6 +73,17 @@ RUN_TABLE=(
   "$(trunc 2 1 0 14)"
   "$(full 1 1 0 13)"
   "$(trunc 1 1 0 13)"
+  # ---- H >= 4 rows (where the Jean Zay 1-step grid collapses): does full backprop rescue them? ----
+  # Truncated reruns only at H4L6 / H6L6, to check the collapse reproduces locally; the other
+  # 1-step cells come from the Jean Zay grid. 42 unrolled blocks (H6L6) still fit in 96 GB.
+  "$(full 6 6 0 95)"
+  "$(full 5 6 0 80)"
+  "$(full 4 6 0 65)"
+  "$(full 6 2 0 45)"
+  "$(full 4 3 0 40)"
+  "$(trunc 6 6 0 40)"
+  "$(trunc 4 6 0 30)"
+  "$(full 4 1 0 25)"
   # ---- stretch: second seed on the H=1 row ----
   "$(full 1 24 1 64)"
   "$(trunc 1 24 1 37)"
@@ -97,143 +95,9 @@ RUN_TABLE=(
 # Bench = heaviest cells (memory / throughput) + one truncated and one control run, which also
 # serve as the in-situ backprop smoke test (scripts/check_bp_smoke.py reads their W&B history).
 DEFAULT_BENCH_RUNS="graphqa_H3_L12_fullbp_local_s0 graphqa_H2_L12_fullbp_local_s0 graphqa_H1_L24_fullbp_local_s0 graphqa_H3_L6_fullbp_local_s0 graphqa_H3_L6_trunc_local_s0 graphqa_H1_L1_fullbp_local_s0"
-RUNS="${RUNS:-}"  # space/comma-separated subset of run names; empty = all (bench: DEFAULT_BENCH_RUNS)
-[[ "$BENCH" == "1" && -z "$RUNS" ]] && RUNS="$DEFAULT_BENCH_RUNS"
 
-mkdir -p "$ROOT/logs" "$ROOT/ckpts"
-CLAIMS="$ROOT/claims/$(date +%s)_$$"  # per invocation: a relaunch re-claims (trained runs are skipped anyway)
-mkdir -p "$CLAIMS"
-
-log() { echo "[$(date '+%F %T')] [gpu$GPU] $*"; }
-
-gpu_mem_used() { nvidia-smi -i "$GPU" --query-gpu=memory.used --format=csv,noheader,nounits | tr -d ' '; }
-
-wait_gpu_idle() {
-  # Other containers' processes may not show up in --query-compute-apps, so also gate on memory.
-  while :; do
-    local apps mem
-    apps="$(nvidia-smi -i "$GPU" --query-compute-apps=pid --format=csv,noheader | tr -d ' ')"
-    mem="$(gpu_mem_used)"
-    if [[ -z "$apps" ]] && (( mem < GPU_IDLE_MIB )); then
-      return
-    fi
-    log "GPU busy (${mem} MiB used, pids: ${apps//$'\n'/,}); waiting ${POLL_SECONDS}s ..."
-    sleep "$POLL_SECONDS"
-  done
-}
-
-train_cmd() {  # $1 = run name, $2 = overrides, $3 = checkpoint path (or null), $4 = W&B project
-  # shellcheck disable=SC2086
-  echo "$PY" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=1 pretrain.py \
-    --config-name "$CONFIG" \
-    arch/size@arch=B \
-    data.path="$DATA_DIR" \
-    $2 \
-    project_name="$4" \
-    run_name="$1" \
-    checkpoint_path="$3"
-}
-
-bench_run() {  # $1 = run name, $2 = overrides
-  local log="$ROOT/logs/bench_$1.log" memlog="$ROOT/logs/bench_$1.mem"
-  wait_gpu_idle
-  log "[bench] $1 for ${BENCH_SECONDS}s"
-  nvidia-smi -i "$GPU" --query-gpu=memory.used --format=csv,noheader,nounits -l 5 > "$memlog" &
-  local mon=$!
-  # shellcheck disable=SC2046
-  CUDA_VISIBLE_DEVICES="$GPU" timeout --signal=INT --kill-after=60 "$BENCH_SECONDS" \
-    $(train_cmd "$1" "$2" null "$SMOKE_PROJECT") > "$log" 2>&1 || true
-  kill "$mon" 2>/dev/null || true
-  # tqdm writes "\r"-separated updates; the last one carries the smoothed rate and the total.
-  local last rate total peak
-  last="$(tr '\r' '\n' < "$log" | grep -E '[0-9]+/[0-9]+ \[' | tail -1 || true)"
-  rate="$(grep -oE '[0-9.]+(it/s|s/it)' <<< "$last" || true)"
-  total="$(grep -oE '/[0-9]+ \[' <<< "$last" | tr -dc '0-9' || true)"
-  peak="$(sort -n "$memlog" | tail -1)"
-  grep -q "OutOfMemoryError" "$log" && peak="OOM"
-  "$PY" - "$1" "${rate:-?}" "${total:-0}" "${peak:-?}" <<'PY'
-import sys
-name, rate, total, peak = sys.argv[1], sys.argv[2], int(sys.argv[3] or 0), sys.argv[4]
-if rate.endswith("it/s"):
-    sps = float(rate[:-4])
-elif rate.endswith("s/it"):
-    sps = 1.0 / float(rate[:-4])
-else:
-    sps = None
-eta = f"{total / sps / 60:.0f} min" if sps and total else "?"
-print(f"[bench] {name:34s} {sps if sps else '?':>8} steps/s  total_steps={total}  train ETA={eta}  peak_mem={peak} MiB", flush=True)
-PY
-}
-
-eval_run() {  # $1 = run name. Final checkpoint only, val + test, same settings as the grid figure.
-  local ckpt="$ROOT/ckpts/$1"
-  [[ -d "$ckpt/fsdp2_epoch_$EPOCHS" ]] || return 0
-  for split in val test; do
-    local out="$ckpt/eval_old_${split}_ep${EPOCHS}.json"
-    [[ -f "$out" ]] && continue
-    log "[eval] $1 epoch $EPOCHS on $split"
-    CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/eval_graphqa.py \
-      --ckpt_path "$ckpt" \
-      --ckpt_epoch "$EPOCHS" \
-      --data "$EVAL_DIR/$split.jsonl" \
-      --use_ema \
-      --max_generation 32 \
-      --out "$out" > "$ROOT/logs/eval_$1_${split}.log" 2>&1 \
-      || log "[eval] FAILED: $1 $split (see logs)"
-  done
-  "$PY" scripts/log_graphqa_evals_to_wandb.py --root "$ROOT" --project "$EVAL_PROJECT" --tag fullbp-local --run "$1" \
-    > "$ROOT/logs/wandb_eval_$1.log" 2>&1 \
-    || log "[eval] wandb logging FAILED: $1 (see $ROOT/logs/wandb_eval_$1.log)"
-}
-
-train_run() {  # $1 = run name, $2 = overrides
-  local ckpt="$ROOT/ckpts/$1"
-  if [[ -d "$ckpt/fsdp2_epoch_$EPOCHS" ]]; then
-    log "[skip] $1 already trained"
-  else
-    wait_gpu_idle
-    log "[train] $1  ($2)"
-    # shellcheck disable=SC2046
-    if ! CUDA_VISIBLE_DEVICES="$GPU" $(train_cmd "$1" "$2" "$ckpt" "$PROJECT") > "$ROOT/logs/train_$1.log" 2>&1; then
-      log "[train] FAILED: $1 (see $ROOT/logs/train_$1.log)"
-      return 1
-    fi
-    log "[train] done: $1"
-  fi
-  eval_run "$1"
-}
-
-worker() {  # $1 = GPU index
-  GPU="$1"
-  local entry name est overrides
-  for entry in "${RUN_TABLE[@]}"; do
-    IFS='|' read -r name est overrides <<< "$entry"
-    if [[ -n "$RUNS" ]] && [[ ! " ${RUNS//,/ } " =~ " $name " ]]; then
-      continue
-    fi
-    mkdir "$CLAIMS/$name" 2>/dev/null || continue  # atomic: the other worker already took it
-    if [[ -n "$DEADLINE" ]] && [[ "$BENCH" != "1" ]] && [[ ! -d "$ROOT/ckpts/$name/fsdp2_epoch_$EPOCHS" ]] \
-       && (( $(date +%s) + est * 60 > $(date -d "$DEADLINE" +%s) )); then
-      log "[deadline] not starting $name (~${est} min would end after $DEADLINE)"
-      continue
-    fi
-    if [[ "$BENCH" == "1" ]]; then
-      bench_run "$name" "$overrides"
-    else
-      train_run "$name" "$overrides" || true  # one failed run should not stop the queue
-    fi
-  done
-  log "worker finished"
-}
+# shellcheck source=scripts/lib_local_queue.sh
+source scripts/lib_local_queue.sh
 
 [[ "$BENCH" == "1" ]] || [[ -f "$DATA_DIR/metadata.json" ]] || { echo "No prepared data at $DATA_DIR" >&2; exit 1; }
-echo "Config: $CONFIG (epochs=$EPOCHS)  data: $DATA_DIR  root: $ROOT  gpus: ${GPUS[*]}  wandb: $WANDB_MODE"
-echo "W&B projects: train=$PROJECT eval=$EVAL_PROJECT bench=$SMOKE_PROJECT  deadline: ${DEADLINE:-none}"
-
-for g in "${GPUS[@]}"; do
-  worker "$g" &
-  sleep 20  # stagger startup (torchrun rendezvous, compile caches)
-done
-wait
-
-echo "[$(date '+%F %T')] queue finished"
+queue_main

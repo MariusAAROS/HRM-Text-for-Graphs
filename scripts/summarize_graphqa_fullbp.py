@@ -101,7 +101,7 @@ def plot_lines(df: pd.DataFrame, ref: pd.DataFrame, fname: str):
         ax.minorticks_off()
         ax.set_title(f"$H = {H}$", fontsize=9)
         ax.set_xlabel("Low-level cycles $L$", fontsize=8)
-        ax.set_ylim(0.25, 0.65)
+        ax.set_ylim(0, 0.65)  # H >= 4 cells collapse to ~0
         sns.despine(ax=ax)
     axes[0].set_ylabel("Test accuracy", fontsize=8)
     handles, labels = axes[0].get_legend_handles_labels()
