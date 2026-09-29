@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--root", default="/work/dfm/marius-ortega/graphqa_scaled")
     ap.add_argument("--project", default="HRM-GraphQA-Scaled-eval")
     ap.add_argument("--run", default=None, help="Only log reports of this run (default: all runs).")
+    ap.add_argument("--tag", default="scaled", help="Experiment tag added to every logged run.")
     args = ap.parse_args()
 
     run_glob = args.run or "*"
@@ -54,10 +55,11 @@ def main():
 
         H, L = report["H_cycles"], report["L_cycles"]
         model = "trm" if "_trm_" in run else "hrm"
+        backprop = "full" if "_fullbp" in run else "truncated"
         wandb.init(
             project=args.project,
             name=f"{run}_{set_name}_{split}_ep{epoch}",
-            tags=[f"H{H}", f"L{L}", model, set_name, split, f"ep{epoch}", "scaled"],
+            tags=[f"H{H}", f"L{L}", model, set_name, split, f"ep{epoch}", backprop, args.tag],
             config={
                 "ckpt_path": report["ckpt_path"],
                 "ckpt_epoch": epoch,
@@ -67,6 +69,7 @@ def main():
                 "L_cycles": L,
                 "ratio_L_over_H": report["ratio_L_over_H"],
                 "model": model,
+                "backprop": backprop,
                 "train_run": run,
                 "eval_set": set_name,
                 "split": split,

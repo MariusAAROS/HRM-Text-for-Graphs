@@ -135,6 +135,11 @@ class Transformer(nn.Module):
             # FSDP2 casts buffers inside its forward hooks but those do not re-run during the AC
             # recompute, so pin the RoPE dtype here to keep saved and recomputed metadata identical.
             seq_info["cos_sin"] = tuple(t.to(x.dtype) for t in seq_info["cos_sin"])
+        if checkpointing and not torch.compiler.is_compiling() and any(layer._compiled_call_impl is None for layer in self.layers):
+            # Eager FlexAttention returns WRONG gradients under non-reentrant checkpoint recompute
+            # (off by orders of magnitude, see scripts/validate_bp_steps.py); the compiled kernel is
+            # correct. So checkpointing is only allowed inside a compiled step or on compiled blocks.
+            raise RuntimeError("grad_checkpointing requires compiled TransformerBlocks (compile_scope=block) or a compiled step.")
 
         # Forward layers
         for layer_id, layer in enumerate(self.layers):
