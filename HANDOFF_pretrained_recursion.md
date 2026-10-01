@@ -25,7 +25,8 @@ experiment design.** If something is ambiguous, stop and ask the user.
 (a), the answer-prior analysis, is already done (W&B run `a-answer-prior`).
 
 ## Where things are
-- Code: `/work/dfm/marius-ortega/Graph-Representation-Learning-for-LLM` (GRL), branch **`cross-repo`**.
+- Code: `/work/dfm/marius-ortega/Graph-Representation-Learning-for-LLM` (GRL), branch **`cross-repo`**,
+  commit **`36c9e81`** or later (`git log --oneline -1`; every W&B run records it as `grl_commit`).
   All scripts: `GRL/scripts/pretrained_recursion/`. Training entry `runner.py`, depth eval `depth_runner.py`,
   probe `scripts/pretrained_recursion/probe_gain_hf.py`. Settings and job definitions: `common.sh`.
 - Outputs: `ROOT=/work/dfm/marius-ortega/pretrained_recursion`:
@@ -41,12 +42,14 @@ All commands from the GRL root:
 ```bash
 cd /work/dfm/marius-ortega/Graph-Representation-Learning-for-LLM
 git branch --show-current          # must print: cross-repo
+git log --oneline -1               # 36c9e81 or later
 ```
 
 **1. GraphQA reference checkpoint.** The user fine-tuned HRM-Text-1B on GraphQA (H2L3, clip 1.0) before the
-window; its `last.ckpt` is under `Meta-ICL/<run id>/checkpoints/`. Preflight finds it automatically. If it
-finds none, or more than one candidate and the newest is not the one the user meant, ask the user and pass it
-explicitly: `GRAPHQA_CKPT=/…/last.ckpt bash scripts/pretrained_recursion/preflight.sh`.
+window: W&B run `8dfnfqn3` (`graphqa-hrm-text-clip1-id`, 9 epochs), checkpoint
+`Meta-ICL/8dfnfqn3/checkpoints/last.ckpt`, already recorded in `$ROOT/graphqa_ckpt.txt`. Preflight checks it
+exists. If preflight reports anything else, ask the user before passing another checkpoint with
+`GRAPHQA_CKPT=/…/last.ckpt bash scripts/pretrained_recursion/preflight.sh`.
 
 **2. Preflight** (~1 min). Must end with `PREFLIGHT OK`:
 ```bash
@@ -59,7 +62,8 @@ bash scripts/pretrained_recursion/preflight.sh
 | HF cache | `export HF_HOME=/work/dfm/.home/.cache/huggingface` and rerun |
 | < 2 GPUs or GPUs busy | stop and ask the user |
 
-**3. Smoke test** (~15 min, GPU0 only, separate W&B project). Must end with `SMOKE OK`:
+**3. Smoke test** (~10 min, GPU0 only, separate W&B project; `SMOKE_BATCH=8` also checks that a batch-8
+fine-tune fits in memory). Must end with `SMOKE OK`:
 ```bash
 GPU=0 SMOKE_BATCH=8 bash scripts/pretrained_recursion/smoke.sh 2>&1 | tail -30
 ```
@@ -101,6 +105,9 @@ Things to check once, after the first training job has run for ~15 min:
 
 **6. Failure rules.**
 - A failed job does not stop its queue; `status/<job>` says `FAILED`, details in `logs/<job>.log`.
+- Every job has a wall-clock cap (probes 20 min, each b checkpoint 75 min, evals 45 min, fine-tunes: the
+  deadline) and is killed with its whole process group when it overruns: `status/<job>` says `KILLED`.
+  That means it hung (e.g. a W&B connection reset) — report it; the queue has already moved on.
 - CUDA OOM in a fine-tune is retried automatically once with batch 4 × accumulation 8 (same effective batch).
   Report it; do nothing else.
 - Loss NaN / divergence: record it, do not relaunch.
@@ -120,7 +127,7 @@ Things to check once, after the first training job has run for ~15 min:
 `results/probe_hf.csv` and the checkpoints stay on `/work`.
 
 ## Sanity values
-- b at (2,3) on each checkpoint ≈ that run's reported score (reported on val, b uses test): GraphQA ~0.83,
+- b at (2,3) on each checkpoint ≈ that run's reported score (reported on val, b uses test): GraphQA ~0.85 (reference run `8dfnfqn3`, val EM 0.852 at its last epoch),
   Gold-1 ~0.98, KQA-Pro ~0.71.
 - c: raw pretrained 1B has L gain ≈ 0.38 (measured in the smoke test; from-scratch size B: 0.004–0.009);
   the random-init twin ≈ 0.5.
