@@ -12,4 +12,7 @@ L_bp_steps: 1
 # -1 = all cycles on that axis. `full_backprop: True` overrides both.
 full_backprop: False
 
+# Re-inject the token embedding into every L step (original HRM / TRM).
+inject_x: False
+
 grad_checkpointing: False

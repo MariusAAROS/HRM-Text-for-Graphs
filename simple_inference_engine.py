@@ -34,7 +34,9 @@ class InferenceCheckpoint:
         return self.tokenizer.decode(tokens)  # pyright: ignore[reportReturnType]
 
 
-def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_use_ema: bool):
+def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_use_ema: bool, arch_overrides: Optional[dict[str, Any]] = None):
+    # `arch_overrides` replaces arch fields at load time, e.g. {"L_cycles": 1} to run a model trained at
+    # L = 6 with a single L step. Only shape-free fields make sense (no weight depends on H/L).
     # Load Checkpoint
     # Load config
     with open(os.path.join(ckpt_path, "all_config.yaml"), "r") as f:
@@ -46,7 +48,7 @@ def inference_load_checkpoint(ckpt_path: str, ckpt_epoch: Optional[int], ckpt_us
     model_cls = load_model_class(model_cfg.arch.name)
     head_cls = load_model_class(model_cfg.arch.head)
     with torch.device("cuda"):
-        combined_cfg = model_cfg.arch.model_dump() | train_metadata.model_dump() | model_cfg.data.model_dump()
+        combined_cfg = model_cfg.arch.model_dump() | (arch_overrides or {}) | train_metadata.model_dump() | model_cfg.data.model_dump()
 
         model: nn.Module = model_cls(combined_cfg)
         # Attach loss head

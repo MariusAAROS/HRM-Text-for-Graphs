@@ -1,0 +1,15 @@
+# Pointer chasing v2 (scripts/make_pointer_chasing.py --N 16 --ks 1,2,3,4,6,8 --queries 4
+# --train 30000 --eval 600). v1 (cfg_pointer.yaml: N=32, one query) stayed at chance: only ~2 of
+# ~425 tokens per sample carry loss. v2 asks 4 start nodes per graph on a 16-node cycle, so ~4% of
+# the tokens are supervised answers and there are ~7.5x more answers over the run.
+#
+# 30k samples x ~262 tokens = ~1,919 steps/epoch at 4096 tokens/step; 3 epochs = ~5.8k steps.
+# NOTE: prepare_sft_data.py must be run with --epochs equal to `epochs` here.
+defaults:
+  - cfg_graphqa
+  - _self_
+
+project_name: HRM-RecursionHyp-Local
+
+epochs: 3
+checkpoint_interval: 3

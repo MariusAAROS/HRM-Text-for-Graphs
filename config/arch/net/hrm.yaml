@@ -15,6 +15,9 @@ bp_max_steps: 5
 # disables the bp warmup above. Alternatively set H_bp_steps/L_bp_steps explicitly (-1 = all);
 # L_bp_steps counts the last N L-applications across ALL H cycles, so its max is H_cycles*L_cycles.
 full_backprop: False
+
+# Re-inject the token embedding into every L step (original HRM / TRM).
+inject_x: False
 # H_bp_steps: null
 # L_bp_steps: null
 

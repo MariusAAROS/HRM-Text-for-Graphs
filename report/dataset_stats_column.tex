@@ -1,0 +1,22 @@
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}l rrr rr r@{}}
+\toprule
+ & \multicolumn{3}{c}{\textbf{Questions}} & \multicolumn{2}{c}{\textbf{Context}} & \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}
+Dataset & Train & Val & Test & Nodes & Edges & Tokens \\
+\midrule
+GraphQA & 3,080 & 385 & 385 & 11 & 29 & 282 \\
+MetaQA & & & & & & \\
+\hspace{0.6em}Gold-1 & 3,999 & 399 & 600 & 94 & 77 & 1,013 \\
+\hspace{0.6em}Gold-5 & 3,929 & 399 & 559 & 95 & 80 & 1,046 \\
+\hspace{0.6em}Gold-10 & 2,940 & 302 & 389 & 94 & 80 & 1,061 \\
+\hspace{0.6em}Retrieved-1 & 3,968 & 394 & 598 & 63 & 67 & 888 \\
+KQA-Pro & 6,824 & 760 & 1,134 & 24 & 57 & 1,298 \\
+\bottomrule
+\end{tabular}
+\caption{Dataset statistics: number of questions per split, mean number of context nodes and edges serialized in the prompt, and mean prompt length in HRM-Text tokens. Gold-$k$ questions have exactly $k$ answers; all other questions have one.}
+\label{tab:dataset_stats_column}
+\end{table}

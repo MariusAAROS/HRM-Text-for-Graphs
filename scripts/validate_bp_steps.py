@@ -2,9 +2,11 @@
 
 Checks that (a) leaving the new fields unset reproduces the legacy warmup formula exactly,
 (b) `full_backprop=True` really builds a graph through every block application, and
-(c) the truncated regime builds a graph through exactly `H_bp + L_bp` of them.
+(c) the truncated regime builds a graph through exactly `H_bp + L_bp` of them, and
+(d) the full-backprop gradient is the TRUE gradient (autograd vs. finite differences in float64),
+    while the truncated one is not.
 
-Run:  python scripts/validate_bp_steps.py
+Run:  python scripts/validate_bp_steps.py   (needs a GPU: FlexAttention has no CPU backward)
 """
 
 import sys
@@ -17,11 +19,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from models.common import resolve_bp_steps  # noqa: E402
 from models.baselines.hrm_nocarry_bp_warmup import HierarchicalReasoningModel  # noqa: E402
 from models.baselines.trm_nocarry import TinyRecursiveModel  # noqa: E402
+from models.transformer import TransformerBlock  # noqa: E402
 
 
 BASE = dict(max_seq_len=128, n_layers=2, hidden_size=64, num_heads=2, expansion=4.0,
             attn_type="causal", init_type="lecun_normal", norm_type="pre", norm_eps=1e-6,
             pos_emb_type="none")
+N_TOKENS = 8
+
+
+def seq_info(n_tokens: int = N_TOKENS) -> dict:
+    """A packed batch holding one causal document (the attention kernel requires the packing metadata)."""
+    return dict(doc_ids=torch.zeros(n_tokens, dtype=torch.int32), prefix_ends=torch.zeros(n_tokens, dtype=torch.int32))
 
 
 def check_legacy_formula():
@@ -67,8 +76,8 @@ def count_grad_blocks(model, **fwd_kwargs) -> int:
     for level in {id(m): m for m in levels}.values():  # TRM shares one module across both roles.
         wrap(level)
 
-    x = torch.randn(8, BASE["hidden_size"], requires_grad=True)
-    model(None, x, **fwd_kwargs)
+    x = torch.randn(N_TOKENS, BASE["hidden_size"], requires_grad=True)
+    model(None, x, **seq_info(), **fwd_kwargs)
     return n
 
 
@@ -124,27 +133,94 @@ def check_mixed_axes_rejected():
     print("[ok] half-specified and conflicting HRM bp budgets are rejected")
 
 
+def compile_blocks(model):
+    """Mirror compile_scope=block in pretrain.py."""
+    for module in model.modules():
+        if isinstance(module, TransformerBlock):
+            module.compile(dynamic=False)
+    return model
+
+
 def check_grad_checkpointing():
-    """Checkpointed and non-checkpointed backward must agree."""
+    """Checkpointed and non-checkpointed backward must agree on the path training uses (compiled blocks),
+    and the eager path -- where FlexAttention's recompute gives wrong gradients -- must refuse to run."""
     cfg = BASE | dict(H_cycles=2, L_cycles=3, full_backprop=True)
     grads = []
     for ckpt in (False, True):
         torch.manual_seed(0)
-        model = HierarchicalReasoningModel(cfg | dict(grad_checkpointing=ckpt))
+        model = compile_blocks(HierarchicalReasoningModel(cfg | dict(grad_checkpointing=ckpt)))
         torch.manual_seed(1)
-        x = torch.randn(8, BASE["hidden_size"])
-        model(None, x, bp_steps=2)[1].square().sum().backward()
+        x = torch.randn(N_TOKENS, BASE["hidden_size"])
+        model(None, x, bp_steps=2, **seq_info())[1].square().sum().backward()
         grads.append(torch.cat([p.grad.flatten() for p in model.parameters() if p.grad is not None]))
 
-    assert torch.allclose(grads[0], grads[1], atol=1e-5), "grad_checkpointing changed the gradients"
-    print("[ok] grad_checkpointing is gradient-neutral")
+    rel = ((grads[0] - grads[1]).norm() / grads[0].norm()).item()
+    assert rel < 1e-4, f"grad_checkpointing changed the gradients (rel err {rel:.2e})"
+    print(f"[ok] grad_checkpointing is gradient-neutral on compiled blocks (rel err {rel:.1e})")
+
+    model = HierarchicalReasoningModel(cfg | dict(grad_checkpointing=True))
+    try:
+        model(None, torch.randn(N_TOKENS, BASE["hidden_size"]), bp_steps=2, **seq_info())
+    except RuntimeError:
+        print("[ok] eager grad_checkpointing (wrong FlexAttention gradients) is refused")
+    else:
+        raise AssertionError("eager grad_checkpointing ran; FlexAttention recompute would give wrong gradients")
+
+
+def directional_derivative_error(model, bp_steps: int = 5, eps: float = 1e-6) -> float:
+    """Relative gap between the autograd directional derivative <grad, v> and the central finite
+    difference (loss(p + eps*v) - loss(p - eps*v)) / 2eps. The finite difference sees the full
+    unrolled function, so only a gradient that flows through every cycle can match it."""
+    model = model.double()
+    params = [p for p in model.parameters() if p.requires_grad]
+    torch.manual_seed(1)
+    x = torch.randn(N_TOKENS, BASE["hidden_size"], dtype=torch.float64)
+    target = torch.randn(N_TOKENS, BASE["hidden_size"], dtype=torch.float64)
+    direction = [torch.randn_like(p) for p in params]
+
+    def loss_fn():
+        return (model(None, x, bp_steps=bp_steps, **seq_info())[1] - target).square().mean()
+
+    grads = torch.autograd.grad(loss_fn(), params, allow_unused=True)
+    analytic = sum((g * v).sum() for g, v in zip(grads, direction) if g is not None).item()
+
+    with torch.no_grad():
+        for p, v in zip(params, direction):
+            p.add_(eps * v)
+        loss_plus = loss_fn().item()
+        for p, v in zip(params, direction):
+            p.sub_(2 * eps * v)
+        loss_minus = loss_fn().item()
+        for p, v in zip(params, direction):
+            p.add_(eps * v)
+    numeric = (loss_plus - loss_minus) / (2 * eps)
+    return abs(analytic - numeric) / max(abs(numeric), 1e-12)
+
+
+def check_true_gradient():
+    """full_backprop must give the exact gradient; the truncated budget must not (so the check has teeth)."""
+    H, L = 2, 3
+    # Eager float64 (the compiled FlexAttention kernel has no fp64); check_grad_checkpointing links
+    # this to the compiled + checkpointed path used in training.
+    torch.manual_seed(0)
+    err = directional_derivative_error(HierarchicalReasoningModel(BASE | dict(H_cycles=H, L_cycles=L, full_backprop=True)))
+    assert err < 1e-5, f"full backprop does not match finite differences: rel err {err:.2e}"
+    print(f"[ok] HRM ({H},{L}) full: autograd matches finite differences (rel err {err:.1e})")
+
+    torch.manual_seed(0)
+    err = directional_derivative_error(HierarchicalReasoningModel(BASE | dict(H_cycles=H, L_cycles=L, H_bp_steps=1, L_bp_steps=1)))
+    assert err > 1e-2, f"truncated gradient unexpectedly matches the true gradient (rel err {err:.2e}); the check is toothless"
+    print(f"[ok] HRM ({H},{L}) truncated(1,1): deviates from the true gradient as expected (rel err {err:.1e})")
 
 
 if __name__ == "__main__":
+    assert torch.cuda.is_available(), "FlexAttention has no CPU backward; run on a GPU node."
+    torch.set_default_device("cuda")
     check_legacy_formula()
     check_sentinel()
     check_hrm_counts()
     check_trm_counts()
     check_mixed_axes_rejected()
     check_grad_checkpointing()
+    check_true_gradient()
     print("\nAll backprop-budget checks passed.")

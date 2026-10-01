@@ -7,6 +7,8 @@ Records, for every recursion state z^k produced inside the H/L loop:
   - eff_rank   participation ratio of the token cov.     -- convergence vs collapse
   - zgrad      ||dLoss/dz^k||                            -- credit assignment through depth
   - cos_x      cosine between z^k and the token embedding x -- survival of the raw input
+  - gain       ||core(h+d+inj) - core(h+inj)|| / ||d||    -- does the incoming state still matter
+  - prenorm_rms  residual RMS before the final norm      -- the washout signature of pre-norm
 
 `zgrad` only exists for steps inside the truncated-BPTT window (HRM runs the recursion
 prefix under no_grad); the absence of the other steps is itself the measurement.
@@ -59,6 +61,13 @@ class InstrumentationConfig(pydantic.BaseModel):
     log_param_grads: bool = True
     log_fusion: bool = True       # Projection shares of hidden_states / input_injection.
     log_x_survival: bool = True   # How much of the token embedding survives at depth.
+
+    # Sensitivity of each recursion step to its incoming state: one extra (no-grad) block forward per
+    # step with the state perturbed by eps * rms(state). Activations are bf16, so eps must stay well
+    # above bf16 rounding (see scripts/probe_gain_ckpt.py for the fp32 calibration).
+    log_gain: bool = True
+    gain_eps: float = 1.0  # bf16 matches fp32 within ~15% at 1.0; at 0.05 bf16 rounding reads 0.04 for a true 0.005.
+    log_prenorm: bool = True      # Residual RMS before the Transformer's final norm.
 
     # Attention recompute. Far more expensive than the stats above, hence its own interval and a
     # restriction to the first/last recursion step of each role.
@@ -199,6 +208,18 @@ class RecursionProbe:
         self._mean(f"fusion/{tag}/norm_ratio",
                    (inj.norm(dim=-1) / h.norm(dim=-1).clamp_min(_EPS)).mean())
 
+    # ---- state sensitivity ----
+    def record_gain(self, gain: Tensor) -> None:
+        if self._tag is not None:
+            self._mean(f"zstat/{self._tag}/gain", gain)
+
+    @torch.no_grad()
+    def record_prenorm(self, x: Tensor) -> None:
+        if not self.config.log_prenorm or self._tag is None:
+            return
+        stride, limit = self._stride(x.shape[0])
+        self._mean(f"zstat/{self._tag}/prenorm_rms", self._subsample(x.detach(), stride, limit).pow(2).mean().sqrt())
+
     # ---- attention ----
     def _query_idx(self, doc_ids: Tensor, n_tokens: int) -> Tensor:
         """Evenly spread query rows over the non-padding tokens, computed once and reused so that
@@ -327,6 +348,18 @@ def active_probe(probe: RecursionProbe):
         yield probe
     finally:
         _ACTIVE_PROBE = None
+
+
+@contextmanager
+def suspend_probe():
+    """Hide the active probe for an auxiliary forward (e.g. the gain perturbation), so the records
+    of the blocks it runs through are not counted twice."""
+    global _ACTIVE_PROBE
+    probe, _ACTIVE_PROBE = _ACTIVE_PROBE, None
+    try:
+        yield
+    finally:
+        _ACTIVE_PROBE = probe
 
 
 # ---- reduction & derived summaries ----

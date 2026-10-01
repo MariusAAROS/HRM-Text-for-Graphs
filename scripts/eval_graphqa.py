@@ -10,8 +10,9 @@ alongside accuracy for the multi-answer variants (e.g. metaqa-gold-5); on
 single-answer data they degenerate to the exact-match number.
 
 The recursion depth (H_cycles / L_cycles) is read from the checkpoint's
-all_config.yaml, so it automatically matches how the model was trained --
-nothing to pass on the CLI.
+all_config.yaml, so it automatically matches how the model was trained.
+--H_cycles / --L_cycles override it at inference (no weight depends on them), e.g.
+--L_cycles 1 tests whether a model trained at L = 6 actually uses its extra L steps.
 
 Usage:
     python scripts/eval_graphqa.py \
@@ -188,6 +189,8 @@ def main():
     ap.add_argument("--batch_size", type=int, default=16, help="Prompts packed per forward (speeds up eval).")
     ap.add_argument("--limit", type=int, default=None, help="Optional cap on number of eval samples.")
     ap.add_argument("--out", default=None, help="Where to write the JSON report.")
+    ap.add_argument("--H_cycles", type=int, default=None, help="Override the trained H_cycles at inference.")
+    ap.add_argument("--L_cycles", type=int, default=None, help="Override the trained L_cycles at inference.")
     # wandb (opt-in: only active when --wandb_project is set)
     ap.add_argument("--wandb_project", default=None, help="W&B project name. Enables wandb logging when set.")
     ap.add_argument("--wandb_entity", default=None, help="W&B entity (team or user). Uses default if omitted.")
@@ -201,8 +204,10 @@ def main():
         rows = rows[: args.limit]
     print(f"Loaded {len(rows)} eval samples from {args.data}")
 
-    ckpt = inference_load_checkpoint(args.ckpt_path, args.ckpt_epoch, args.use_ema)
-    H_cycles, L_cycles = read_config_cycles(args.ckpt_path)
+    overrides = {k: v for k, v in (("H_cycles", args.H_cycles), ("L_cycles", args.L_cycles)) if v is not None}
+    ckpt = inference_load_checkpoint(args.ckpt_path, args.ckpt_epoch, args.use_ema, arch_overrides=overrides)
+    trained_H, trained_L = read_config_cycles(args.ckpt_path)
+    H_cycles, L_cycles = overrides.get("H_cycles", trained_H), overrides.get("L_cycles", trained_L)
 
     # ---- wandb init (opt-in) -----------------------------------------------
     use_wandb = args.wandb_project is not None
@@ -222,6 +227,8 @@ def main():
                 "limit": args.limit,
                 "H_cycles": H_cycles,
                 "L_cycles": L_cycles,
+                "trained_H_cycles": trained_H,
+                "trained_L_cycles": trained_L,
                 "ratio_L_over_H": (L_cycles / H_cycles) if (H_cycles and L_cycles) else None,
             },
         )
@@ -257,6 +264,8 @@ def main():
         "data": args.data,
         "H_cycles": H_cycles,
         "L_cycles": L_cycles,
+        "trained_H_cycles": trained_H,
+        "trained_L_cycles": trained_L,
         "ratio_L_over_H": (L_cycles / H_cycles) if (H_cycles and L_cycles) else None,
         "n": len(rows),
         "correct": correct,

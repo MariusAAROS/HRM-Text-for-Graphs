@@ -8,6 +8,7 @@ from torch import Tensor, nn
 from pydantic import BaseModel
 
 from models.layers import SwiGLU, AttnType, Attention, Cache, RotaryEmbedding, find_multiple
+from utils.instrumentation import get_active_probe
 
 
 class InitConfig(BaseModel):
@@ -33,7 +34,9 @@ class TransformerConfig(BaseModel):
     init_type: Literal["fixed_normal", "lecun_normal", "megatron"]
     init_std: Optional[float] = None
 
-    norm_type: Literal["pre", "post"]
+    # "peri" (Peri-LN) also normalises each sublayer output before the residual add, which bounds every
+    # write to RMS 1 and so caps residual growth (pre-norm lets it reach RMS ~300 in the recurrence).
+    norm_type: Literal["pre", "post", "peri"]
     norm_eps: float
 
     pos_emb_type: Literal["rope", "none"]
@@ -102,6 +105,10 @@ class TransformerBlock(nn.Module):
         x = self.norm(x + self.attn(x, **seq_info))
         return self.norm(x + self.mlp(x))
 
+    def _forward_peri(self, x: Tensor, **seq_info) -> Tensor:  # Peri Norm (input and output norm)
+        x = x + self.norm(self.attn(self.norm(x), **seq_info))
+        return x + self.norm(self.mlp(self.norm(x)))
+
 
 class Transformer(nn.Module):
     def __init__(self, config: TransformerConfig) -> None:
@@ -118,9 +125,9 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([TransformerBlock(config, layer_idx=_layer_idx) for _layer_idx in range(config.n_layers)])
         self.grad_checkpointing = config.grad_checkpointing
 
-        # Use final norm only for prenorm
+        # Final norm for pre / peri norm (post norm already ends normalised)
         self.norm_f = lambda x: x
-        if config.norm_type == "pre":
+        if config.norm_type in ("pre", "peri"):
             self.norm_f = lambda x: F.rms_norm(x, (x.shape[-1], ), eps=config.norm_eps)
 
         # Create cache function
@@ -135,6 +142,11 @@ class Transformer(nn.Module):
             # FSDP2 casts buffers inside its forward hooks but those do not re-run during the AC
             # recompute, so pin the RoPE dtype here to keep saved and recomputed metadata identical.
             seq_info["cos_sin"] = tuple(t.to(x.dtype) for t in seq_info["cos_sin"])
+        if checkpointing and not torch.compiler.is_compiling() and any(layer._compiled_call_impl is None for layer in self.layers):
+            # Eager FlexAttention returns WRONG gradients under non-reentrant checkpoint recompute
+            # (off by orders of magnitude, see scripts/validate_bp_steps.py); the compiled kernel is
+            # correct. So checkpointing is only allowed inside a compiled step or on compiled blocks.
+            raise RuntimeError("grad_checkpointing requires compiled TransformerBlocks (compile_scope=block) or a compiled step.")
 
         # Forward layers
         for layer_id, layer in enumerate(self.layers):
@@ -144,4 +156,7 @@ class Transformer(nn.Module):
             else:
                 x = layer(x, **seq_info, cache=layer_cache)
 
+        probe = get_active_probe()
+        if probe is not None:
+            probe.record_prenorm(x)
         return self.norm_f(x)
