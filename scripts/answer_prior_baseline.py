@@ -104,14 +104,14 @@ def main():
     runs = runs.merge(baseline[["split", "task", "prior_acc"]], on=["split", "task"], how="left")
     runs["acc_minus_prior"] = runs["acc"] - runs["prior_acc"]
 
-    os.makedirs(OUT_DIR, exist_ok=True)
-    baseline.to_csv(os.path.join(OUT_DIR, "answer-prior-baseline.csv"), index=False)
-    runs.to_csv(os.path.join(OUT_DIR, "answer-prior-runs.csv"), index=False)
-
     # A run is "diverged" when its overall accuracy is below 0.1 (the H >= 4 constant-output runs).
     overall = runs.assign(hits=runs["acc"] * runs["n"]).groupby(["source", "run", "file"])[["hits", "n"]].sum()
     diverged = overall.index[(overall["hits"] / overall["n"]) < 0.1]
     runs["diverged"] = runs.set_index(["source", "run", "file"]).index.isin(diverged)
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    baseline.to_csv(os.path.join(OUT_DIR, "answer-prior-baseline.csv"), index=False)
+    runs.to_csv(os.path.join(OUT_DIR, "answer-prior-runs.csv"), index=False)
 
     # Console summary: test split, non-diverged from-scratch runs pooled, at their trained
     # depth (the eval_*Lov1* files re-evaluate a run with L overridden to 1).
