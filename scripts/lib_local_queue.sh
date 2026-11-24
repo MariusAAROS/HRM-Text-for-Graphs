@@ -12,6 +12,8 @@
 # Required: ROOT DATA_DIR EVAL_DIR CONFIG PROJECT RUN_TABLE
 # Optional: PY EVAL_PROJECT SMOKE_PROJECT EVAL_SET EVAL_TAG GPUS BENCH BENCH_SECONDS DEADLINE
 #           POLL_SECONDS GPU_IDLE_MIB RUNS DEFAULT_BENCH_RUNS
+#           EVAL_MAX_GEN (eval_graphqa.py --max_generation, default 32)
+#           EVAL_LOG_ARGS (extra log_graphqa_evals_to_wandb.py args, e.g. --grouped --config exp=...)
 # Hooks (define before queue_main to override):
 #   run_env <name>     sets RUN_CONFIG RUN_DATA_DIR RUN_EVAL_DIR RUN_EVAL_SET RUN_EPOCHS for a run
 #   extra_evals <name> extra evaluations after the standard ones (e.g. an L_cycles override)
@@ -117,7 +119,7 @@ eval_one() {  # $1 = run name, $2 = eval set name, $3.. = extra eval_graphqa.py 
       --ckpt_epoch "$RUN_EPOCHS" \
       --data "$RUN_EVAL_DIR/$split.jsonl" \
       --use_ema \
-      --max_generation 32 \
+      --max_generation "${EVAL_MAX_GEN:-32}" \
       "$@" \
       --out "$out" > "$ROOT/logs/eval_${name}_${set}_${split}.log" 2>&1 \
       || log "[eval] FAILED: $name $set $split (see logs)"
@@ -130,7 +132,8 @@ eval_run() {  # $1 = run name
   if declare -F extra_evals > /dev/null; then
     extra_evals "$1"
   fi
-  "$PY" scripts/log_graphqa_evals_to_wandb.py --root "$ROOT" --project "$EVAL_PROJECT" --tag "$EVAL_TAG" --run "$1" \
+  # shellcheck disable=SC2086
+  "$PY" scripts/log_graphqa_evals_to_wandb.py --root "$ROOT" --project "$EVAL_PROJECT" --tag "$EVAL_TAG" --run "$1" ${EVAL_LOG_ARGS:-} \
     > "$ROOT/logs/wandb_eval_$1.log" 2>&1 \
     || log "[eval] wandb logging FAILED: $1 (see $ROOT/logs/wandb_eval_$1.log)"
 }

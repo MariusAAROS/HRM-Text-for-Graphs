@@ -23,7 +23,10 @@ import wandb
 RAW = {
     "old": "/work/dfm/marius-ortega/Graph-Representation-Learning-for-LLM/data/graphqa/baseline/standard",
     "fixed": "{root}/raw/baseline-fixed/standard",
+    # GraphQA v2 (MaxFlow capacities, deduped val/test): row order matches data/graphqa/v2/<enc>/hrm-text.
+    "v2": "/work/dfm/marius-ortega/Graph-Representation-Learning-for-LLM/data/graphqa_v2/adjacency/graphqa/baseline/standard",
 }
+SEED_SUFFIX = re.compile(r"[-_]s(\d+)$")
 PATTERN = re.compile(r"eval_(\w+?)_(val|test)_ep(\d+)\.json$")
 
 
@@ -33,7 +36,13 @@ def main():
     ap.add_argument("--project", default="HRM-GraphQA-Scaled-eval")
     ap.add_argument("--run", default=None, help="Only log reports of this run (default: all runs).")
     ap.add_argument("--tag", default="scaled", help="Experiment tag added to every logged run.")
+    ap.add_argument("--config", nargs="*", default=[], metavar="KEY=VALUE",
+                    help="Flat keys added to every run config, e.g. exp=recursion_hyp data_version=v2.")
+    ap.add_argument("--grouped", action="store_true",
+                    help="job_type=eval, W&B group = train run name without its _s<seed> suffix (the training runs' "
+                         "group), and config.seed parsed from that suffix.")
     args = ap.parse_args()
+    extra = dict(kv.split("=", 1) for kv in args.config)
 
     run_glob = args.run or "*"
     for path in sorted(glob.glob(os.path.join(args.root, "ckpts", run_glob, "eval_*_ep*.json"))):
@@ -62,11 +71,19 @@ def main():
         H, L = report["H_cycles"], report["L_cycles"]
         model = "trm" if "_trm_" in run else "hrm"
         backprop = "full" if "_fullbp" in run else "truncated"
+        grouping = {}
+        if args.grouped:
+            seed = SEED_SUFFIX.search(run)
+            grouping = {"group": SEED_SUFFIX.sub("", run), "job_type": "eval"}
+            extra_run = {"seed": int(seed.group(1))} if seed else {}
+        else:
+            extra_run = {}
         wandb.init(
             project=args.project,
             name=f"{run}_{set_name}_{split}_ep{epoch}",
             tags=[f"H{H}", f"L{L}", model, set_name, split, f"ep{epoch}", backprop, args.tag],
-            config={
+            **grouping,
+            config=extra | extra_run | {
                 "ckpt_path": report["ckpt_path"],
                 "ckpt_epoch": epoch,
                 "data": report["data"],

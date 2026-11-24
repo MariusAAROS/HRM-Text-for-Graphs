@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from dataclasses import dataclass
 from pathlib import Path
 from glob import glob
@@ -69,6 +69,12 @@ class PretrainConfig(pydantic.BaseModel):
     project_name: Optional[str] = None
     run_name: Optional[str] = None
     checkpoint_path: Optional[str] = None
+    # W&B extras: run group (e.g. the run name without its seed), job type, tags, and flat keys
+    # merged into the run config for filtering (e.g. exp, encoding, data_version).
+    wandb_group: Optional[str] = None
+    wandb_job_type: Optional[str] = None
+    wandb_tags: List[str] = []
+    wandb_config: Dict[str, Any] = {}
 
     # Resume / fine-tune from checkpoint
     resume_from: Optional[str] = None
@@ -384,7 +390,9 @@ def launch(hydra_config: DictConfig):
     if RANK == 0:
         progress_bar = tqdm.tqdm(total=train_state.total_steps)
 
-        wandb.init(project=config.project_name, name=config.run_name, config=config.model_dump() | {"train_metadata": train_metadata.model_dump()},
+        wandb.init(project=config.project_name, name=config.run_name, group=config.wandb_group,
+                   job_type=config.wandb_job_type, tags=config.wandb_tags or None,
+                   config=config.model_dump() | {"train_metadata": train_metadata.model_dump()} | config.wandb_config,
                    settings=wandb.Settings(_disable_stats=True))  # type: ignore
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
         save_code_and_config(config, train_metadata)
