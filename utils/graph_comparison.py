@@ -44,6 +44,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from scipy import stats
 
 
@@ -200,7 +201,8 @@ def compare_distributions(df_a, df_b, stat_cols):
 # ----------------------------------------------------------------------
 
 def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
-                        log_y="auto", log_y_threshold=20):
+                        log_y="auto", log_y_threshold=20, colors=None, stat_labels=None,
+                        figsize=None):
     """
     Parameters
     ----------
@@ -213,14 +215,22 @@ def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
         True: always use log y-axis. False: never (old behavior).
     log_y_threshold : float
         Peak-to-smallest-bar ratio that triggers auto log-scaling.
+    colors : dict[str, color], optional
+        Dataset label -> color. Default: tab10 (tab20 beyond 10 datasets).
+    stat_labels : dict[str, str], optional
+        Statistic column -> display name for the subplot titles. Default: the column name.
+    figsize : (float, float), optional
+        Default: 5 x 3.5 inches per subplot.
     """
     n = len(stat_cols)
     nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize or (5 * ncols, 3.5 * nrows))
     axes = np.array(axes).reshape(-1)
 
-    cmap = plt.get_cmap("tab10" if len(labels) <= 10 else "tab20")
-    colors = {label: cmap(i % cmap.N) for i, label in enumerate(labels)}
+    if colors is None:
+        cmap = plt.get_cmap("tab10" if len(labels) <= 10 else "tab20")
+        colors = {label: cmap(i % cmap.N) for i, label in enumerate(labels)}
+    stat_labels = stat_labels or {}
 
     for i, col in enumerate(stat_cols):
         ax = axes[i]
@@ -255,7 +265,7 @@ def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
                         vals = per_label_vals.get(label)
                         if vals is None:
                             continue
-                        counts, _, _ = ax.hist(vals, bins=shared_edges, alpha=0.5,
+                        counts, _, _ = ax.hist(vals, bins=shared_edges, alpha=0.5, linewidth=0,
                                                 label=label, color=colors[label], density=True)
                         heights.append(np.asarray(counts))
                         any_plotted = True
@@ -268,12 +278,11 @@ def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
                         if log_y is True or ratio > log_y_threshold:
                             ax.set_yscale("log")
 
-        ax.set_title(col, fontsize=10)
-        ax.set_xlabel(col, fontsize=8)
-        ax.set_ylabel("probability density" + (" (log)" if ax.get_yscale() == "log" else ""), fontsize=8)
-        if any_plotted:
-            ax.legend(fontsize=7)
-        else:
+        ax.set_title(stat_labels.get(col, col), fontsize=9)
+        ax.set_ylabel("Density" + (" (log)" if ax.get_yscale() == "log" else ""), fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.spines[["top", "right"]].set_visible(False)
+        if not any_plotted:
             ax.text(0.5, 0.5, "no finite values", ha="center", va="center",
                      transform=ax.transAxes, fontsize=8, color="gray")
 
@@ -281,6 +290,10 @@ def plot_distributions(df, stat_cols, labels, save_path=None, bins=20, ncols=3,
         fig.delaxes(axes[j])
 
     fig.tight_layout()
+    # One legend for the whole grid, above the subplots.
+    handles = [Patch(facecolor=colors[label], alpha=0.5, label=label) for label in labels]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0),
+               ncol=len(labels), fontsize=8, frameon=False)
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     return fig
@@ -417,17 +430,20 @@ class GraphDatasetComparison:
             return pd.DataFrame()
         return pd.concat(rows, ignore_index=True)
 
-    def plot(self, save_path=None, bins=20, ncols=3, log_y="auto", log_y_threshold=20):
+    def plot(self, save_path=None, bins=20, ncols=3, log_y="auto", log_y_threshold=20,
+             colors=None, stat_labels=None, figsize=None):
         """Grid of overlaid distribution plots, one subplot per statistic, all datasets together.
 
         log_y : "auto" (default) switches a subplot to a log y-axis when one
         dataset's peak is much taller than another's — otherwise a
         low/spread-out distribution can get visually flattened to nothing
         next to a sharp spike. Pass True/False to force it on/off everywhere.
+        colors / stat_labels / figsize: see `plot_distributions`.
         """
         return plot_distributions(self.raw_data, self.stat_cols, self.labels,
                                    save_path=save_path, bins=bins, ncols=ncols,
-                                   log_y=log_y, log_y_threshold=log_y_threshold)
+                                   log_y=log_y, log_y_threshold=log_y_threshold,
+                                   colors=colors, stat_labels=stat_labels, figsize=figsize)
 
     def mmd_matrix(self, sigma=1.0, max_graphs=200, random_state=0):
         """
@@ -479,10 +495,12 @@ def compare_graph_datasets(
     save_path=None,
     run_mmd=False,
     mmd_kwargs=None,
+    plot_kwargs=None,
 ):
     """
     Backward-compatible convenience wrapper for comparing exactly two
     datasets. For 3+ datasets, use GraphDatasetComparison directly.
+    `plot_kwargs` are forwarded to `plot_distributions` (colors, stat_labels, figsize, ...).
 
     Returns
     -------
@@ -494,7 +512,8 @@ def compare_graph_datasets(
         "figure"   : matplotlib Figure (only if plot=True)
     """
     comp = GraphDatasetComparison({label_a: graphs_a, label_b: graphs_b})
-    results = comp.compare(plot=plot, save_path=save_path, run_mmd=run_mmd, mmd_kwargs=mmd_kwargs)
+    results = comp.compare(plot=plot, save_path=save_path, run_mmd=run_mmd, mmd_kwargs=mmd_kwargs,
+                           plot_kwargs=plot_kwargs)
 
     tests = results.pop("pairwise_tests")
     results["tests"] = tests.drop(columns=["dataset_a", "dataset_b"], errors="ignore")

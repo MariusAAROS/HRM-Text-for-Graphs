@@ -44,7 +44,7 @@ conda run -n hrm-text-graph-pt python pretrain.py --config-name cfg_graphqa \
 
 # Evaluate
 conda run -n hrm-text-graph-pt python scripts/eval_graphqa.py \
-  --ckpt_path <ckpt_dir> --data data/graphqa/hrm-text/standard/test.jsonl --use_ema --out <ckpt_dir>/eval_test.json
+  --ckpt_path <ckpt_dir> --data data/graphqa/hrm-text/standard/test.jsonl --use_ema --out <ckpt_dir>/eval_test.json --wandb_project graphqa-eval
 
 # Checks
 conda run -n hrm-text-graph-pt python scripts/validate_bp_steps.py     # BPTT budget correctness (GPU)
@@ -53,7 +53,7 @@ conda run -n hrm-text-graph-pt python scripts/test_prepare_sft_filter.py  # data
 
 ## Gotchas
 
-- Keep `WANDB_MODE` online/offline, never `disabled`: `all_config.yaml` (required by eval) is only written with a W&B run.
+- All runs (training, eval, sweeps, debug) must always be logged to W&B (`eval_graphqa.py` only logs when `--wandb_project` is passed). Use `WANDB_MODE=online` whenever possible; fall back to `offline` only where there is no network (e.g. Jean Zay compute nodes), and sync afterwards. Never `disabled`: `all_config.yaml` (required by eval) is only written with a W&B run.
 - `resume_from` restarts the LR and bp-warmup schedules at step 0 — interrupted runs must be retrained from scratch.
 - `global_batch_size` = packed tokens per step (Flex sequence length); keep it a multiple of 128.
 - Truncated BPTT budget shrinks with H (H_bp = min(H, bp-1), L_bp = bp - H_bp), which confounds depth with gradient signal; the full-BP arm exists to de-confound it.

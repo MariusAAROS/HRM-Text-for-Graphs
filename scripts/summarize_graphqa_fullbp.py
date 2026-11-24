@@ -26,7 +26,7 @@ NAME_RE = re.compile(r"graphqa_H(?P<H>\d+)_L(?P<L>\d+)_(?P<regime>fullbp|trunc)_
 FIG_DIR = Path("report/figures")
 COL_W = 3.35
 ACCENT, MUTED = "#c0392b", "#7f8c8d"  # same roles as the notebook: truncated = accent, full BP = muted
-TRUNC_BP, FULL_BP = "1-step gradient", "Full backprop"
+TRUNC_BP, FULL_BP = "Truncated BPTT (5 blocks)", "Full backprop"
 
 sns.set_theme(style="whitegrid", context="paper", font_scale=1.15)
 mpl.rcParams.update({
@@ -61,7 +61,7 @@ def plot_grid(df: pd.DataFrame, fname: str):
     fig, axes = plt.subplots(1, 3, figsize=(COL_W * 2.1, 2.3), gridspec_kw=dict(wspace=0.35))
     panels = [(TRUNC_BP, grids[TRUNC_BP], "rocket_r", 0, 0.6),
               (FULL_BP, grids[FULL_BP], "rocket_r", 0, 0.6),
-              ("Full $-$ 1-step", delta, "vlag", -0.15, 0.15)]
+              ("Full $-$ truncated", delta, "vlag", -0.15, 0.15)]
     for ax, (title, grid, cmap, vmin, vmax) in zip(axes, panels):
         sns.heatmap(grid, ax=ax, mask=grid.isna(), annot=True, fmt="+.3f" if cmap == "vlag" else ".3f",
                     cmap=cmap, vmin=vmin, vmax=vmax, center=0 if cmap == "vlag" else None,
@@ -93,7 +93,7 @@ def plot_lines(df: pd.DataFrame, ref: pd.DataFrame, fname: str):
                 ax.scatter(sub["L"], sub["accuracy"], s=10, color=color, alpha=0.5, zorder=2, linewidth=0)
         r = ref[ref["H"] == H]
         ax.scatter(r["L"], r["accuracy"], s=22, facecolors="none", edgecolors="0.35", linewidth=0.9,
-                   label="1-step (Jean Zay grid)", zorder=4)
+                   label="Truncated (Jean Zay grid)", zorder=4)
         ax.set_xscale("log", base=2)
         L_ticks = sorted(set(df.loc[df["H"] == H, "L"]))
         ax.set_xticks(L_ticks)
@@ -136,7 +136,7 @@ def main():
 
     table = df.pivot_table(index=["H", "L"], columns="bp", values="accuracy", aggfunc="mean")
     table["delta"] = table.get(FULL_BP) - table.get(TRUNC_BP)
-    table = table.join(ref.set_index(["H", "L"])["accuracy"].rename("1-step (JZ)"))
+    table = table.join(ref.set_index(["H", "L"])["accuracy"].rename("truncated (JZ)"))
     print(table.round(3).to_string())
 
     plot_grid(df, "ablation_fullbp_grid")
